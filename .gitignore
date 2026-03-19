@@ -1,3 +1,4 @@
+
 # Logs
 logs
 *.log
@@ -15,7 +16,6 @@ dist-ssr
 coverage
 *.local
 
-# Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -29,16 +29,15 @@ coverage
 
 .eslintcache
 
-# Cypress
 /cypress/videos/
 /cypress/screenshots/
 
-# Vitest
 __screenshots__/
 
-# Vite
 *.timestamp-*-*.mjs
 
-# Variables de entorno
 .env
 .env.*
+#backend
+backend/node_modules/
+backend/.env
