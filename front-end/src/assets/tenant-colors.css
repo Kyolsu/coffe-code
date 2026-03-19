@@ -1,0 +1,52 @@
+:root {
+  /* sobre el negocio (se deben sobreescribir) */
+  --tenant-primario: #3f99ff;
+  --tenant-secundario: #ffffff;
+  --tenant-fondo: #000000;
+  --tenant-texto: #ffffff;
+  --tenant-texto-muted: #78716c;
+  --tenant-logo-url: none;
+  --tenant-fuente: 'DM Sans', sans-serif;
+  --tenant-fuente-publica: ;
+  --tenant-publico-primario: ;
+  --tenant-publico-secundario: ;
+
+  /* del sistema (no se deben sobreescribir) */
+  --color-exitoso: #16a34a;
+  --color-advertencia: #d9a106;
+  --color-error: #dc2626;
+  --color-info: #2563eb;
+  --color-cancelar: #fd8d8d;
+
+  /* colores para las órdenes (no se deben sobreescribir) */
+  --color-orden-pendiente: #f59e0b;
+  --color-orden-preparacion: #3b82f6;
+  --color-orden-lista: #22c55e;
+  --color-orden-entregada: #6b7280;
+  --color-orden-cancelada: #ef4444;
+
+  /* espaciado */
+  --espacio-1: 4px;
+  --espacio-2: 8px;
+  --espacio-3: 12px;
+  --espacio-4: 16px;
+  --espacio-5: 20px;
+  --espacio-6: 24px;
+  --espacio-8: 32px;
+  --espacio-10: 40px;
+  --espacio-12: 48px;
+
+  /* tamaño de tipografía */
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-base: 15px;
+  --font-size-md: 17px;
+  --font-size-lg: 20px;
+  --font-size-xl: 24px;
+  --font-size-2xl: 30px;
+  --font-size-3xl: 38px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 600;
+}
