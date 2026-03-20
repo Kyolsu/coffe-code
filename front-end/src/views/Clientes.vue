@@ -1,133 +1,234 @@
+<script setup lang="ts">
+import { ref, computed, watch } from 'vue'
+import Sidebar from '../components/Sidebar.vue'
+
+// ── TIPOS ─────────────────────────────
+interface Cliente {
+  id: number
+  nombre: string
+  expediente: string
+}
+
+// ── ESTADO ────────────────────────────
+const clientes = ref<Cliente[]>([])
+const busqueda = ref('')
+
+const nuevoCliente = ref<Cliente>({
+  id: 0,
+  nombre: '',
+  expediente: ''
+})
+
+const editando = ref(false)
+
+// ── FILTRO ────────────────────────────
+const clientesFiltrados = computed(() =>
+  clientes.value.filter(c =>
+    c.nombre.toLowerCase().includes(busqueda.value.toLowerCase()) ||
+    c.expediente.toLowerCase().includes(busqueda.value.toLowerCase())
+  )
+)
+
+// ── ACCIONES ──────────────────────────
+const guardarCliente = () => {
+  if (editando.value) {
+    const index = clientes.value.findIndex(c => c.id === nuevoCliente.value.id)
+    if (index !== -1) {
+      clientes.value[index] = { ...nuevoCliente.value }
+    }
+    editando.value = false
+  } else {
+    clientes.value.push({
+      ...nuevoCliente.value,
+      id: Date.now()
+    })
+  }
+
+  limpiarFormulario()
+}
+
+const editarCliente = (cliente: Cliente) => {
+  nuevoCliente.value = { ...cliente }
+  editando.value = true
+}
+
+const eliminarCliente = (id: number) => {
+  if (confirm('¿Eliminar cliente?')) {
+    clientes.value = clientes.value.filter(c => c.id !== id)
+  }
+}
+
+const limpiarFormulario = () => {
+  nuevoCliente.value = { id: 0, nombre: '', expediente: '' }
+  editando.value = false
+}
+
+// ── PERSISTENCIA ──────────────────────
+const STORAGE_KEY = 'clientes_becados'
+
+const cargar = () => {
+  const data = localStorage.getItem(STORAGE_KEY)
+  if (data) clientes.value = JSON.parse(data)
+}
+
+const guardar = () => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(clientes.value))
+}
+
+cargar()
+
+// guardar automáticamente
+watch(clientes, guardar, { deep: true })
+</script>
+
 <template>
-  <div class="container">
-    <h1>Clientes Becados</h1>
+  <div class="clientes-layout">
+    <Sidebar />
 
-    <!-- BUSCADOR -->
-    <input 
-      v-model="busqueda" 
-      placeholder="Buscar por nombre o expediente..." 
-      class="buscador"
-    />
+    <main class="clientes-main">
 
-    <!-- FORMULARIO -->
-    <form @submit.prevent="guardarCliente">
-      <input v-model="cliente.nombre" placeholder="Nombre" required />
-      <input v-model="cliente.expediente" placeholder="Expediente" required />
-      <button type="submit">
-        {{ editando ? 'Actualizar' : 'Agregar' }}
-      </button>
-    </form>
+      <!-- HEADER -->
+      <header class="clientes-header">
+        <h1 class="page-title">Clientes Becados</h1>
+      </header>
 
-    <!-- LISTA -->
-    <table>
-      <thead>
-        <tr>
-          <th>Nombre</th>
-          <th>Expediente</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(c, index) in clientesFiltrados" :key="index">
-          <td>{{ c.nombre }}</td>
-          <td>{{ c.expediente }}</td>
-          <td>
-            <button @click="editarCliente(index)">Editar</button>
-            <button @click="eliminarCliente(index)">Eliminar</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+      <!-- BUSCADOR -->
+      <input
+        v-model="busqueda"
+        class="search-input"
+        placeholder="Buscar por nombre o expediente..."
+      />
+
+      <!-- FORMULARIO -->
+      <div class="form-card">
+        <input v-model="nuevoCliente.nombre" placeholder="Nombre" />
+        <input v-model="nuevoCliente.expediente" placeholder="Expediente" />
+        <button @click="guardarCliente">
+          {{ editando ? 'Actualizar' : 'Agregar' }}
+        </button>
+      </div>
+
+      <!-- LISTA -->
+      <div class="clientes-grid">
+        <div
+          v-for="cliente in clientesFiltrados"
+          :key="cliente.id"
+          class="cliente-card"
+        >
+          <div class="cliente-info">
+            <strong>{{ cliente.nombre }}</strong>
+            <span>{{ cliente.expediente }}</span>
+          </div>
+
+          <div class="cliente-actions">
+            <button @click="editarCliente(cliente)">✏️</button>
+            <button @click="eliminarCliente(cliente.id)">🗑️</button>
+          </div>
+        </div>
+
+        <!-- VACÍO -->
+        <div v-if="clientesFiltrados.length === 0" class="empty">
+          Sin clientes registrados
+        </div>
+      </div>
+
+    </main>
   </div>
 </template>
 
-<script>
-export default {
-  data() {
-    return {
-      clientes: [],
-      cliente: {
-        nombre: '',
-        expediente: ''
-      },
-      editando: false,
-      indexEditando: null,
-      busqueda: ''
-    };
-  },
+<style scoped>
+/* ── LAYOUT ── */
+.clientes-layout {
+  display: flex;
+  min-height: 100vh;
+  background: var(--tenant-fondo, #000);
+}
 
-  computed: {
-    clientesFiltrados() {
-      return this.clientes.filter(c =>
-        c.nombre.toLowerCase().includes(this.busqueda.toLowerCase()) ||
-        c.expediente.toLowerCase().includes(this.busqueda.toLowerCase())
-      );
-    }
-  },
-
-  methods: {
-    guardarCliente() {
-      if (this.editando) {
-        this.clientes[this.indexEditando] = { ...this.cliente };
-        this.editando = false;
-      } else {
-        this.clientes.push({ ...this.cliente });
-      }
-      this.limpiarFormulario();
-    },
-
-    editarCliente(index) {
-      this.cliente = { ...this.clientes[index] };
-      this.editando = true;
-      this.indexEditando = index;
-    },
-
-    eliminarCliente(index) {
-      if (confirm('¿Seguro que quieres eliminar este cliente?')) {
-        this.clientes.splice(index, 1);
-      }
-    },
-
-    limpiarFormulario() {
-      this.cliente = { nombre: '', expediente: '' };
-      this.editando = false;
-      this.indexEditando = null;
-    }
-  },
-
-  mounted() {
-    const data = localStorage.getItem('clientes');
-    if (data) this.clientes = JSON.parse(data);
-  },
-
-  watch: {
-    clientes: {
-      handler(val) {
-        localStorage.setItem('clientes', JSON.stringify(val));
-      },
-      deep: true
-    }
-  }
-};
-</script>
-
-<style>
-.container {
+.clientes-main {
+  flex: 1;
   padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.buscador {
-  margin-bottom: 15px;
-  padding: 8px;
-  width: 100%;
+/* HEADER */
+.page-title {
+  color: #fff;
+  font-size: 28px;
 }
 
-table {
-  margin-top: 20px;
-  width: 100%;
+/* BUSCADOR */
+.search-input {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #222;
+  background: #111;
+  color: #fff;
 }
 
-button {
-  margin-right: 5px;
+/* FORM */
+.form-card {
+  display: flex;
+  gap: 10px;
+}
+
+.form-card input {
+  padding: 10px;
+  background: #111;
+  border: 1px solid #222;
+  color: #fff;
+  border-radius: 8px;
+}
+
+.form-card button {
+  background: var(--tenant-primario, #3f99ff);
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* GRID */
+.clientes-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+/* CARD */
+.cliente-card {
+  background: #0e0e0e;
+  border: 1px solid #1c1c1c;
+  padding: 16px;
+  border-radius: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cliente-info strong {
+  color: #fff;
+  display: block;
+}
+
+.cliente-info span {
+  color: #888;
+  font-size: 13px;
+}
+
+.cliente-actions button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+/* EMPTY */
+.empty {
+  color: #666;
+  grid-column: 1 / -1;
+  text-align: center;
 }
 </style>
