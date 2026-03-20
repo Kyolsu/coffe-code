@@ -2,28 +2,23 @@
 import { ref, computed } from 'vue'
 import Sidebar from '../components/Sidebar.vue'
 
-// ── TIPOS ──────────────────────────────────────────────
-type OrderStatus = 'pendiente' | 'preparacion' | 'lista' | 'entregada'
+// ── TIPOS ─────────────────────────────
+type OrderStatus = 'pendiente' | 'preparacion' | 'entregada'
 type Origen = 'A' | 'B'
 
-interface OrderItem {
-  name: string
-  qty: number
-  customizations: string[]
-  extras: { name: string; qty: number }[]
-}
+
 
 interface Order {
   id: number
   orderNumber: number
   origen: Origen
   status: OrderStatus
-  items: OrderItem[]
+
   createdAt: string
-  total: number
+
 }
 
-// ── CONTADOR GLOBAL (0–99) ─────────────────────────────
+// ── CONTADOR (0–99) ───────────────────
 const contador = ref(0)
 
 const generarNumeroOrden = () => {
@@ -31,170 +26,113 @@ const generarNumeroOrden = () => {
   return contador.value
 }
 
-// ── ESTADO ─────────────────────────────────────────────
+// ── ESTADO ────────────────────────────
 const orders = ref<Order[]>([])
 
-// MOCK INICIAL
-orders.value = [
-  {
-    id: 1,
-    orderNumber: 45,
-    origen: 'A',
-    status: 'pendiente',
-    createdAt: '10:02',
-    total: 100,
-    items: [
-      { name: 'Chilaquiles', qty: 1, customizations: ['Verde'], extras: [] },
-    ],
-  },
-]
-
-// ── CREAR ORDEN ────────────────────────────────────────
+// ── CREAR ORDEN ───────────────────────
 const crearOrden = (origen: Origen) => {
   orders.value.push({
     id: Date.now(),
     orderNumber: generarNumeroOrden(),
     origen,
     status: 'pendiente',
-    createdAt: new Date().toLocaleTimeString(),
-    total: 0,
-    items: []
+    createdAt: new Date().toLocaleTimeString()
   })
 }
 
-// ── FILTRO POR STATUS ───────────────────────────────────
-const statusFilters: { label: string; value: OrderStatus | 'todas' }[] = [
-  { label: 'Todas', value: 'todas' },
-  { label: 'Pendientes', value: 'pendiente' },
-  { label: 'Preparación', value: 'preparacion' },
-  { label: 'Listas', value: 'lista' },
-  { label: 'Entregadas', value: 'entregada' },
-]
+// ── CAMBIO DE ESTADO (flujo) ──────────
+const avanzarEstado = (order: Order) => {
+  if (order.status === 'pendiente') {
+    order.status = 'preparacion'
+  } else if (order.status === 'preparacion') {
+    order.status = 'entregada'
+  }
+}
 
-const activeFilter = ref<OrderStatus | 'todas'>('todas')
-
-const filteredOrders = computed(() =>
-  activeFilter.value === 'todas'
-    ? orders.value
-    : orders.value.filter(o => o.status === activeFilter.value)
-)
-
-// ── DATOS PARA TABLERO ─────────────────────────────────
-const ordenesPendientes = computed(() =>
+// ── COLUMNAS ──────────────────────────
+const pendientes = computed(() =>
   orders.value.filter(o => o.status === 'pendiente')
 )
 
-const ordenesPreparacion = computed(() =>
-  orders.value.filter(o =>
-    o.status === 'preparacion' || o.status === 'lista'
-  )
+const preparacion = computed(() =>
+  orders.value.filter(o => o.status === 'preparacion')
 )
 
-const ordenesEntregadas = computed(() =>
+const entregadas = computed(() =>
   orders.value.filter(o => o.status === 'entregada')
 )
 
-// ── COLORES POR STATUS ──────────────────────────────────
-const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
-  pendiente:   { label: 'Pendiente',   color: '#f59e0b' },
-  preparacion: { label: 'Preparación', color: '#3b82f6' },
-  lista:       { label: 'Lista',       color: '#22c55e' },
-  entregada:   { label: 'Entregada',   color: '#6b7280' },
-}
-
-// ── ACCIONES ────────────────────────────────────────────
-const editOrder = (id: number) => {
-  console.log('edit', id)
-}
-
-const deleteOrder = (id: number) => {
-  if (confirm('¿Eliminar orden?')) {
-    orders.value = orders.value.filter(o => o.id !== id)
-  }
-}
+// ── FORMATO ───────────────────────────
+const formato = (o: Order) => `${o.orderNumber}${o.origen}`
 </script>
 
 <template>
-  <div class="ordenes-layout">
+  <div class="layout">
     <Sidebar />
 
-    <main class="ordenes-main">
+    <main class="main">
 
       <!-- HEADER -->
-      <header class="ordenes-header">
-        <div class="filter-bar">
-          <button
-            v-for="f in statusFilters"
-            :key="f.value"
-            class="filter-chip"
-            :class="{ active: activeFilter === f.value }"
-            @click="activeFilter = f.value"
-          >
-            {{ f.label }}
-          </button>
-        </div>
+      <header class="header">
+        <h1>Pedidos</h1>
 
-        <h1 class="page-title">Órdenes</h1>
-
-        <!-- BOTONES NUEVA ORDEN -->
         <div>
-          <button @click="crearOrden('A')" class="btn">Nueva A</button>
-          <button @click="crearOrden('B')" class="btn">Nueva B</button>
+          <button @click="crearOrden('A')">Nuevo A</button>
+          <button @click="crearOrden('B')">Nuevo B</button>
         </div>
       </header>
 
-      <!-- GRID -->
-      <div class="orders-grid">
-        <div
-          v-for="order in filteredOrders"
-          :key="order.id"
-          class="order-card"
-          :style="{ '--status-color': statusMeta[order.status].color }"
-        >
-          <!-- CABECERA -->
-          <div class="order-header">
-            <span class="order-number">
-              Orden: {{ order.orderNumber }}{{ order.origen }}
-            </span>
-            <span class="order-time">{{ order.createdAt }}</span>
-          </div>
+      <!-- COLUMNAS -->
+      <div class="board">
 
-          <!-- STATUS -->
-          <div class="status-badge">
-            <span
-              class="status-dot"
-              :style="{ background: statusMeta[order.status].color }"
-            ></span>
-            <span
-              class="status-label"
-              :style="{ color: statusMeta[order.status].color }"
+        <!-- PENDIENTES -->
+        <div class="column red">
+          <h2>Pendientes</h2>
+
+          <div class="list">
+            <div
+              v-for="o in pendientes"
+              :key="o.id"
+              class="card"
+              @click="avanzarEstado(o)"
             >
-              {{ statusMeta[order.status].label }}
-            </span>
-          </div>
-
-          <!-- ITEMS -->
-          <div class="order-items">
-            <div v-for="(item, i) in order.items" :key="i">
-              {{ item.name }} × {{ item.qty }}
-            </div>
-          </div>
-
-          <!-- FOOTER -->
-          <div class="order-footer">
-            <span>${{ order.total }}</span>
-
-            <div class="order-actions">
-              <button @click="editOrder(order.id)">✏️</button>
-              <button @click="deleteOrder(order.id)">🗑️</button>
+              {{ formato(o) }}
             </div>
           </div>
         </div>
 
-        <!-- VACÍO -->
-        <div v-if="filteredOrders.length === 0" class="orders-empty">
-          Sin órdenes
+        <!-- PREPARACIÓN -->
+        <div class="column yellow">
+          <h2>En preparación</h2>
+
+          <div class="list">
+            <div
+              v-for="o in preparacion"
+              :key="o.id"
+              class="card"
+              @click="avanzarEstado(o)"
+            >
+              {{ formato(o) }}
+            </div>
+          </div>
         </div>
+
+        <!-- ENTREGADAS -->
+        <div class="column green">
+          <h2>Entregados</h2>
+
+          <div class="list">
+            <div
+              v-for="o in entregadas"
+              :key="o.id"
+              class="card"
+            >
+              {{ formato(o) }}
+            </div>
+          </div>
+        </div>
+
+
       </div>
 
     </main>
@@ -202,54 +140,85 @@ const deleteOrder = (id: number) => {
 </template>
 
 <style scoped>
-.ordenes-layout {
+/* LAYOUT */
+.layout {
   display: flex;
   min-height: 100vh;
-  background: #000;
+  background: #111;
 }
 
-.ordenes-main {
+.main {
   flex: 1;
   padding: 20px;
 }
 
-.ordenes-header {
+/* HEADER */
+.header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  
+  margin-bottom: 20px;
 }
 
-.btn {
+button {
   margin-left: 10px;
-  padding: 8px;
+  padding: 10px;
   background: #3f99ff;
   color: white;
   border: none;
   border-radius: 8px;
+  cursor: pointer;
 }
 
-.orders-grid {
-  margin-top: 20px;
+/* BOARD */
+.board {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-
+  gap: 15px;
+  height: calc(100vh - 120px);
 }
 
-.order-card {
-  background: #111;
-  padding: 10px;
+/* COLUMN */
+.column {
+  background: #ddd;
   border-radius: 10px;
-
+  padding: 10px;
 }
 
-.order-number {
+.column h2 {
+  text-align: center;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+/* COLORS */
+.red h2 {
+  background: #c92a00;
   color: white;
 }
 
-.orders-empty {
-  color: gray;
+.yellow h2 {
+  background: #e0c95a;
+}
+
+.green h2 {
+  background: #6ccf4f;
+}
+
+/* LIST */
+.list {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* CARD */
+.card {
+  background: white;
+  padding: 15px 20px;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
 }
 </style>
 
