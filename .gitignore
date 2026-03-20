@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 
 # Logs
 logs
@@ -16,7 +15,7 @@ dist/
 dist-ssr
 coverage
 *.local
-
+# Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -29,12 +28,12 @@ coverage
 *.tsbuildinfo
 
 .eslintcache
-
+# Cypress
 /cypress/videos/
 /cypress/screenshots/
-
+# Vitest
 __screenshots__/
-
+# Vite
 *.timestamp-*-*.mjs
 
 .env
@@ -42,7 +41,3 @@ __screenshots__/
 #backend
 backend/node_modules/
 backend/.env
-=======
-backend/node_modules/
-backend/.env
->>>>>>> 80cbeb0 (Moviendo backend)
