@@ -40,7 +40,7 @@ const crearOrden = (origen: Origen) => {
   })
 }
 
-// ── CAMBIO DE ESTADO (flujo) ──────────
+// ── CAMBIO DE ESTADO ──────────────────
 const avanzarEstado = (order: Order) => {
   if (order.status === 'pendiente') {
     order.status = 'preparacion'
@@ -93,7 +93,7 @@ const formato = (o: Order) => `${o.orderNumber}${o.origen}`
             <div
               v-for="o in pendientes"
               :key="o.id"
-              class="card"
+              class="card pendiente"
               @click="avanzarEstado(o)"
             >
               {{ formato(o) }}
@@ -109,7 +109,7 @@ const formato = (o: Order) => `${o.orderNumber}${o.origen}`
             <div
               v-for="o in preparacion"
               :key="o.id"
-              class="card"
+              class="card preparacion"
               @click="avanzarEstado(o)"
             >
               {{ formato(o) }}
@@ -117,7 +117,7 @@ const formato = (o: Order) => `${o.orderNumber}${o.origen}`
           </div>
         </div>
 
-        <!-- ENTREGADAS -->
+        <!-- ENTREGADOS -->
         <div class="column green">
           <h2>Entregados</h2>
 
@@ -125,7 +125,7 @@ const formato = (o: Order) => `${o.orderNumber}${o.origen}`
             <div
               v-for="o in entregadas"
               :key="o.id"
-              class="card"
+              class="card entregada"
             >
               {{ formato(o) }}
             </div>
@@ -144,7 +144,7 @@ const formato = (o: Order) => `${o.orderNumber}${o.origen}`
 .layout {
   display: flex;
   min-height: 100vh;
-  background: #111;
+  background: #000;
 }
 
 .main {
@@ -157,6 +157,10 @@ const formato = (o: Order) => `${o.orderNumber}${o.origen}`
   display: flex;
   justify-content: space-between;
   margin-bottom: 20px;
+}
+
+.header h1 {
+  color: white;
 }
 
 button {
@@ -179,8 +183,9 @@ button {
 
 /* COLUMN */
 .column {
-  background: #ddd;
-  border-radius: 10px;
+  background: #0e0e0e;
+  border: 1px solid #1c1c1c;
+  border-radius: 12px;
   padding: 10px;
 }
 
@@ -188,16 +193,18 @@ button {
   text-align: center;
   padding: 10px;
   border-radius: 8px;
+  color: white;
 }
 
-/* COLORS */
+/* COLORS HEADER */
 .red h2 {
   background: #c92a00;
-  color: white;
+
 }
 
 .yellow h2 {
   background: #e0c95a;
+  color: black;
 }
 
 .green h2 {
@@ -212,13 +219,37 @@ button {
   gap: 10px;
 }
 
-/* CARD */
+/* CARD BASE */
 .card {
-  background: white;
+
   padding: 15px 20px;
   border-radius: 20px;
   font-weight: bold;
   cursor: pointer;
+  transition: transform 0.1s, opacity 0.1s;
+}
+
+/* HOVER */
+.card:hover {
+  transform: scale(1.05);
+  opacity: 0.9;
+}
+
+/* ESTADOS */
+.pendiente {
+  background: #e74c3c;
+  color: white;
+}
+
+.preparacion {
+  background: #f1c40f;
+  color: black;
+}
+
+.entregada {
+  background: #2ecc71;
+  color: white;
+  cursor: default;
 }
 </style>
 
