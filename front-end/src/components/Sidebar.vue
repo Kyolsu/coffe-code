@@ -1,21 +1,22 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
+import { useRouter } from 'vue-router'
 
-const router = useRouter()
-
-// Estado para retraer/expandir el menú
+const router    = useRouter()
+const authStore = useAuthStore()
 const isCollapsed = ref(false)
 
-// Mock temporal del rol del usuario (puedes cambiarlo a 'cajero' para probar que se ocultan opciones)
-const userRole = ref('admin')
+// Rol real desde el store — ya mapeado a string ('admin', 'gerente', etc.)
+const userRole = authStore.rol
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
 }
 
 const handleLogout = () => {
-  localStorage.removeItem('coffe_token')
+  authStore.logout()           // limpia localStorage + estado reactivo
   router.push({ name: 'login' })
 }
 </script>
