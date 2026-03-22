@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import Sidebar from '../components/Sidebar.vue'
+import { useAuthStore } from '../stores/auth'
 
-const router = useRouter()
+const router    = useRouter()
+const authStore = useAuthStore()
 
-// Mock del nombre de usuario
-const userName = ref('Admin')
+// Nombre real desde el store (lo guardó el login)
+const userName = computed(() => authStore.nombreUsuario ?? 'Usuario')
 
 // Funciones de navegación para las tarjetas
 const irAVistaPublica = () => router.push({ name: 'vista-publica' })

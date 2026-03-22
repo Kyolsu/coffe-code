@@ -6,6 +6,19 @@ import DashboardView       from '../views/Dashboard.vue'
 import VentaView           from '../views/Venta.vue'
 import KitchenDisplayView  from '../views/KitchenDisplay.vue'
 
+// Las siguientes vistas aún no existen — crear el archivo cuando se implementen
+// import MenuView         from '../views/Menu.vue'
+// import OrdenesView      from '../views/Ordenes.vue'
+// import ClientesView     from '../views/Clientes.vue'
+// import EstadisticasView from '../views/Estadisticas.vue'
+// import UsuariosView     from '../views/Usuarios.vue'
+// import PersonalizacionView from '../views/Personalizacion.vue'
+// import VistaPublicaView from '../views/VistaPublica.vue'   // Sin auth — ruta pública
+
+// ── ROLES ───────────────────────────────────────────────────────────────────
+// Usados en meta.roles para controlar acceso por perfil
+// Roles disponibles: 'admin' | 'gerente' | 'cajero' | 'cocinero'
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -91,35 +104,42 @@ const router = createRouter({
   ],
 })
 
+// ── MAPEO DE ROL — debe coincidir con auth.ts ────────────────────────────────
+// El backend devuelve id_rol como número — confirmar con equipo de backend
+const ROL_MAP: Record<string, string> = {
+  '1': 'admin',
+  '2': 'gerente',
+  '3': 'cajero',
+  '4': 'cocinero',
+}
+
 // ── GUARDIA DE NAVEGACIÓN ────────────────────────────────────────────────────
-router.beforeEach((to, _from, next) => {
-  const token = localStorage.getItem('coffe_token')
+router.beforeEach((to, _from) => {
+  const token           = localStorage.getItem('coffe_token')
   const isAuthenticated = token !== null
 
-  // TODO: cuando exista la API, decodificar el JWT para obtener el rol real
-  // Por ahora se lee de localStorage como mock
-  const userRole = localStorage.getItem('coffe_role') as string | null
+  const rolId    = localStorage.getItem('coffe_role') ?? ''
+  const userRole = ROL_MAP[rolId] ?? null
 
-  // 1. Ruta pública (login, vista-publica) con sesión activa → al dashboard
+  // 1. Ruta pública con sesión activa → al dashboard
   if (to.name === 'login' && isAuthenticated) {
-    return next({ name: 'dashboard' })
+    return { name: 'dashboard' }
   }
 
   // 2. Ruta protegida sin sesión → al login
   if (to.meta.requiresAuth && !isAuthenticated) {
-    return next({ name: 'login' })
+    return { name: 'login' }
   }
 
   // 3. Ruta con restricción de rol → verificar acceso
   const allowedRoles = to.meta.roles as string[] | undefined
   if (allowedRoles && userRole && !allowedRoles.includes(userRole)) {
-    // El rol no tiene permiso — redirigir según su perfil
-    if (userRole === 'cocinero') return next({ name: 'cocina' })
-    return next({ name: 'dashboard' })
+    if (userRole === 'cocinero') return { name: 'cocina' }
+    return { name: 'dashboard' }
   }
 
-  // 4. Todo OK
-  next()
+  // 4. Todo OK — retornar true deja pasar la navegación
+  return true
 })
 
 export default router
