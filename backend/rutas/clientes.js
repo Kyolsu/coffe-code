@@ -191,7 +191,7 @@ router.get('/beneficio/mostrar', async (req, res) => {
 });
 
 // Elimina un beneficio específico por su ID
-router.delete('/beneficio/:id', verificarToken, async (req, res) => {
+router.delete('/beneficio/eliminar/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -225,6 +225,44 @@ router.delete('/beneficio/:id', verificarToken, async (req, res) => {
         res.status(500).json({ 
             status: "error", 
             mensaje: "Error interno al eliminar el beneficio" 
+        });
+    }
+});
+
+//Modificar un beneficio
+router.put('/beneficio/modificar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre, descripcion } = req.body;
+
+        const query = 'SELECT fn_actualizar_tipo_beneficio($1, $2, $3) AS resultado';
+        const values = [id, nombre || null, descripcion || null];
+
+        const result = await db.query(query, values);
+        const mensajeRecibido = result.rows[0].resultado;
+        if (mensajeRecibido === 'No existe el tipo de beneficio') {
+            return res.status(404).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+        if (mensajeRecibido === 'Nombre inválido' || mensajeRecibido === 'Ya existe otro con ese nombre') {
+            return res.status(400).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: mensajeRecibido,
+            datos_actualizados: { id, nombre, descripcion }
+        });
+
+    } catch (err) {
+        console.error("Error al actualizar tipo de beneficio:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la actualización del beneficio"
         });
     }
 });
