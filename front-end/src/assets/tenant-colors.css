@@ -1,52 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
+
 :root {
-  /* sobre el negocio (se deben sobreescribir) */
-  --tenant-primario: #3f99ff;
-  --tenant-secundario: #ffffff;
-  --tenant-fondo: #000000;
-  --tenant-texto: #ffffff;
-  --tenant-texto-muted: #78716c;
-  --tenant-logo-url: none;
-  --tenant-fuente: 'DM Sans', sans-serif;
+  /* ── COLORES DEL NEGOCIO (personalizar por tenant) ─────────────────────── */
+  --tenant-primario:    #c2600a;  /* café quemado — botones, acentos, links   */
+  --tenant-secundario:  #ffffff;  /* blanco                                   */
+  --tenant-fondo:       #f5f0eb; /* crema muy suave — fondo de páginas       */
+  --tenant-texto:       #1c1410; /* café casi negro — texto sobre fondo claro*/
+  --tenant-texto-muted: #7c6a5a; /* café medio — texto secundario, labels    */
+  --tenant-logo-url:    none;
+  --tenant-fuente:      'DM Sans', sans-serif;
   --tenant-fuente-publica: ;
   --tenant-publico-primario: ;
   --tenant-publico-secundario: ;
 
-  /* del sistema (no se deben sobreescribir) */
-  --color-exitoso: #16a34a;
-  --color-advertencia: #d9a106;
-  --color-error: #dc2626;
-  --color-info: #2563eb;
-  --color-cancelar: #fd8d8d;
+  /* ── COLORES DE SUPERFICIES CLARAS (no sobreescribir) ──────────────────── */
+  --color-superficie:     #ffffff;  /* cards, paneles, modales                */
+  --color-superficie-alt: #f0ebe5;  /* inputs sobre fondo claro               */
+  --color-borde:          #e8ddd5;  /* bordes sobre fondo claro               */
+  --color-hover:          #f0ebe5;  /* hover en botones ghost, nav items      */
 
-  /* colores para las órdenes (no se deben sobreescribir) */
-  --color-orden-pendiente: #f59e0b;
-  --color-orden-preparacion: #3b82f6;
-  --color-orden-lista: #22c55e;
-  --color-orden-entregada: #6b7280;
-  --color-orden-cancelada: #ef4444;
+  /* ── COLORES DE SUPERFICIES OSCURAS (login card, sidebar, KD) ──────────── */
+  /* Úsalos en componentes con fondo oscuro para mantener el contraste        */
+  --color-oscuro-fondo:        #141110;  /* fondo de cards oscuras             */
+  --color-oscuro-input:        #1f1916;  /* fondo de inputs sobre card oscura  */
+  --color-oscuro-borde:        #2e2420;  /* borde de inputs/cards oscuras      */
+  --color-oscuro-texto:        #f0ebe5;  /* texto principal sobre fondo oscuro */
+  --color-oscuro-texto-muted:  #9a8070;  /* texto secundario sobre fondo oscuro*/
+  --color-oscuro-placeholder:  #5a4a40;  /* placeholder sobre fondo oscuro     */
 
-  /* espaciado */
-  --espacio-1: 4px;
-  --espacio-2: 8px;
-  --espacio-3: 12px;
-  --espacio-4: 16px;
-  --espacio-5: 20px;
-  --espacio-6: 24px;
-  --espacio-8: 32px;
+  /* ── COLORES DEL SISTEMA (no sobreescribir) ────────────────────────────── */
+  --color-exitoso:     #16a34a;
+  --color-advertencia: #d97706;
+  --color-error:       #dc2626;
+  --color-info:        #2563eb;
+  --color-cancelar:    #ef4444;
+
+  /* ── COLORES DE ÓRDENES (no sobreescribir) ─────────────────────────────── */
+  --color-orden-pendiente:   #d97706;
+  --color-orden-preparacion: #2563eb;
+  --color-orden-lista:       #16a34a;
+  --color-orden-entregada:   #6b7280;
+  --color-orden-cancelada:   #dc2626;
+
+  /* ── ESPACIADO ─────────────────────────────────────────────────────────── */
+  --espacio-1:   4px;
+  --espacio-2:   8px;
+  --espacio-3:  12px;
+  --espacio-4:  16px;
+  --espacio-5:  20px;
+  --espacio-6:  24px;
+  --espacio-8:  32px;
   --espacio-10: 40px;
   --espacio-12: 48px;
 
-  /* tamaño de tipografía */
-  --font-size-xs: 11px;
-  --font-size-sm: 13px;
+  /* ── TIPOGRAFÍA ─────────────────────────────────────────────────────────── */
+  --font-size-xs:   11px;
+  --font-size-sm:   13px;
   --font-size-base: 15px;
-  --font-size-md: 17px;
-  --font-size-lg: 20px;
-  --font-size-xl: 24px;
-  --font-size-2xl: 30px;
-  --font-size-3xl: 38px;
+  --font-size-md:   17px;
+  --font-size-lg:   20px;
+  --font-size-xl:   24px;
+  --font-size-2xl:  30px;
+  --font-size-3xl:  38px;
 
   --font-weight-normal: 400;
   --font-weight-medium: 500;
-  --font-weight-bold: 600;
+  --font-weight-bold:   600;
+}
+
+/* ── RESET MÍNIMO ──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--tenant-fuente, 'DM Sans', sans-serif);
+  background-color: var(--tenant-fondo, #f5f0eb);
+  color: var(--tenant-texto, #1c1410);
+  -webkit-font-smoothing: antialiased;
 }

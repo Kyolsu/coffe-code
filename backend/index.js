@@ -10,6 +10,10 @@ const menuRutas=require('./rutas/menu')
 app.use(express.json());
 app.use(cors());
 app.use(express.json());
+app.use(cors({
+  origin: 'http://localhost:5173',
+}));
+app.use(express.json());
 //RUTAS DE ENDPOINTS
 app.use('/api/usuarios', usuariosRutas);
 app.use('/api/clientes',clientesRutas);
