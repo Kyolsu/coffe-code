@@ -178,7 +178,7 @@ const handleLogout = () => {
 .kd-layout {
   display: flex;
   min-height: 100vh;
-  background-color: var(--tenant-fondo, #000);
+  background-color: var(--color-oscuro-fondo, #141110);
   position: relative;
 }
 
@@ -202,8 +202,8 @@ const handleLogout = () => {
   display: flex;
   align-items: center;
   gap: var(--espacio-2, 8px);
-  background: #111;
-  border: 1px solid #1e1e1e;
+  background: var(--color-oscuro-input, #1f1916);
+  border: 1px solid var(--color-oscuro-borde, #2e2420);
   color: var(--color-cancelar, #fd8d8d);
   border-radius: 10px;
   padding: var(--espacio-2, 8px) var(--espacio-3, 12px);
@@ -241,13 +241,13 @@ const handleLogout = () => {
   margin: 0;
   font-size: var(--font-size-3xl, 38px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--color-oscuro-texto, #f0ebe5);
   line-height: 1;
 }
 
 .kd-subtitle {
   font-size: var(--font-size-sm, 13px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--color-oscuro-texto-muted, #9a8070);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
@@ -262,8 +262,8 @@ const handleLogout = () => {
   display: flex;
   align-items: baseline;
   gap: var(--espacio-2, 8px);
-  background: #0e0e0e;
-  border: 1px solid #1c1c1c;
+  background: var(--color-oscuro-input, #1f1916);
+  border: 1px solid var(--color-oscuro-borde, #2e2420);
   border-radius: 10px;
   padding: var(--espacio-2, 8px) var(--espacio-4, 16px);
 }
@@ -277,7 +277,7 @@ const handleLogout = () => {
 
 .kd-count-label {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--color-oscuro-texto-muted, #9a8070);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -287,17 +287,17 @@ const handleLogout = () => {
   align-items: center;
   gap: var(--espacio-2, 8px);
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--color-oscuro-texto-muted, #9a8070);
 }
 
 kbd {
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+  background: var(--color-oscuro-input, #1f1916);
+  border: 1px solid var(--color-oscuro-borde, #2e2420);
   border-radius: 4px;
   padding: 1px 6px;
   font-size: var(--font-size-xs, 11px);
   font-family: var(--tenant-fuente, monospace);
-  color: var(--tenant-texto, #fff);
+  color: var(--color-oscuro-texto, #f0ebe5);
 }
 
 /* ── GRID DE ÓRDENES ── */
@@ -309,15 +309,15 @@ kbd {
   gap: var(--espacio-4, 16px);
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: #1e1e1e transparent;
+  scrollbar-color: var(--color-oscuro-borde, #2e2420) transparent;
   align-content: start;
   min-height: 0;
 }
 
 /* ── TARJETA DE ORDEN ── */
 .order-card {
-  background: #0e0e0e;
-  border: 1.5px solid #1c1c1c;
+  background: var(--color-oscuro-input, #1f1916);
+  border: 1.5px solid var(--color-oscuro-borde, #2e2420);
   border-radius: 16px;
   padding: var(--espacio-4, 16px);
   display: flex;
@@ -330,7 +330,7 @@ kbd {
 }
 
 .order-card:hover {
-  border-color: #2a2a2a;
+  border-color: rgba(194, 96, 10, 0.4);
   transform: translateY(-1px);
 }
 
@@ -345,21 +345,21 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #1a1a1a;
+  border-bottom: 1px solid var(--color-oscuro-borde, #2e2420);
   padding-bottom: var(--espacio-2, 8px);
 }
 
 .order-number {
   font-size: var(--font-size-md, 17px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--color-oscuro-texto, #f0ebe5);
 }
 
 .order-time {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
-  background: #181818;
-  border: 1px solid #222;
+  color: var(--color-oscuro-texto-muted, #9a8070);
+  background: var(--color-oscuro-fondo, #141110);
+  border: 1px solid var(--color-oscuro-borde, #2e2420);
   border-radius: 20px;
   padding: 2px 8px;
 }
@@ -394,13 +394,13 @@ kbd {
 .order-item-name {
   font-size: var(--font-size-base, 15px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--color-oscuro-texto, #f0ebe5);
 }
 
 .order-item-qty {
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-medium, 500);
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario, #c2600a);
   white-space: nowrap;
 }
 
@@ -413,9 +413,9 @@ kbd {
 
 .custom-tag {
   font-size: var(--font-size-xs, 11px);
-  color: var(--color-advertencia, #d9a106);
-  background: rgba(217, 161, 6, 0.08);
-  border: 1px solid rgba(217, 161, 6, 0.15);
+  color: var(--color-advertencia, #d97706);
+  background: rgba(217, 119, 6, 0.12);
+  border: 1px solid rgba(217, 119, 6, 0.2);
   border-radius: 4px;
   padding: 1px 6px;
 }
@@ -426,19 +426,18 @@ kbd {
   align-items: center;
   gap: var(--espacio-1, 4px);
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--color-oscuro-texto-muted, #9a8070);
   padding-left: var(--espacio-2, 8px);
 }
 
 .order-extra svg {
   width: 10px;
   height: 10px;
-  color: var(--tenant-texto-muted, #78716c);
   flex-shrink: 0;
 }
 
 .extra-qty {
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario, #c2600a);
 }
 
 /* Botón "Lista" al seleccionar */
@@ -478,7 +477,7 @@ kbd {
   justify-content: center;
   gap: var(--espacio-4, 16px);
   padding: var(--espacio-12, 48px) 0;
-  color: #2a2a2a;
+  color: var(--color-oscuro-borde, #2e2420);
 }
 
 .kd-empty svg {
@@ -489,6 +488,7 @@ kbd {
 .kd-empty p {
   margin: 0;
   font-size: var(--font-size-base, 15px);
+  color: var(--color-oscuro-texto-muted, #9a8070);
 }
 
 /* ── WATERMARK ── */
@@ -505,7 +505,7 @@ kbd {
 
 .watermark-label {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--color-oscuro-texto-muted, #9a8070);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -513,7 +513,7 @@ kbd {
 .watermark-brand {
   font-size: var(--font-size-md, 17px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario, #c2600a);
   letter-spacing: -0.02em;
 }
 
