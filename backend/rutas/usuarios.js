@@ -4,6 +4,7 @@ const db = require('../db');
 const bcrypt = require('bcrypt'); //pal cifrado
 const saltRounds = 10; // Nivel de seguridad
 const jwt = require('jsonwebtoken'); //jwt tokens
+const verificarToken = require('../middleware/auth');
 
 //Endpoint registro
 router.post('/registro', async (req, res) => {
@@ -65,6 +66,74 @@ router.delete('/eliminar', async (req, res) => {
     }
 });
 
+// Endpoint cambiar usuario/contraseña
+router.put('/actualizar', async (req, res) => {
+    const { usuario_actual, contra_actual, nuevo_nombre, nueva_contra } = req.body;
+
+    if (!usuario_actual || !contra_actual) {
+        return res.status(400).json({ status: "error", mensaje: "Se requiere usuario y contraseña actual para confirmar" });
+    }
+
+    try {
+        const userQuery = 'SELECT * FROM usuarios WHERE nombre_usuario = $1';
+        const userResult = await db.query(userQuery, [usuario_actual]);
+
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ status: "error", mensaje: "Usuario no encontrado" });
+        }
+
+        const user = userResult.rows[0];
+        const match = await bcrypt.compare(contra_actual, user.contra);
+        if (!match) {
+            return res.status(401).json({ status: "error", mensaje: "La contraseña actual es incorrecta" });
+        }
+        let passwordFinal = null;
+        if (nueva_contra) {
+            passwordFinal = await bcrypt.hash(nueva_contra, 10);
+        }
+
+        const updateQuery = 'SELECT * FROM actualizar_perfil_usuario($1, $2, $3)';
+        const updateResult = await db.query(updateQuery, [
+            user.id_usuario, 
+            nuevo_nombre || null, 
+            passwordFinal
+        ]);
+
+        const { mensaje, exito } = updateResult.rows[0];
+        res.status(exito ? 200 : 400).json({ status: exito ? "ok" : "error", mensaje });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ status: "error", mensaje: "Error interno del servidor" });
+    }
+});
+//Endpoint mostrar info del usuario 
+router.get('/perfil', verificarToken, async (req, res) => {
+    try {
+
+        const query = 'SELECT id_usuario, nombre_usuario, id_rol FROM usuarios WHERE id_usuario = $1';
+        const result = await db.query(query, [req.usuario.id]); 
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ status: "error", mensaje: "Usuario no encontrado" });
+        }
+
+        const usuario = result.rows[0];
+        res.json({
+            status: "ok",
+            datos: {
+                id: usuario.id_usuario,
+                nombre: usuario.nombre_usuario,
+                rol: usuario.id_rol
+            }
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ status: "error", mensaje: "Error al obtener perfil" });
+    }
+});
+
 // Endpoint de Login
 router.post('/login', async (req, res) => {
     const { usuario, contra } = req.body;
@@ -116,45 +185,4 @@ router.post('/login', async (req, res) => {
     }
 });
 
-// Endpoint cambiar usuario/contraseña
-router.put('/actualizar', async (req, res) => {
-    const { usuario_actual, contra_actual, nuevo_nombre, nueva_contra } = req.body;
-
-    if (!usuario_actual || !contra_actual) {
-        return res.status(400).json({ status: "error", mensaje: "Se requiere usuario y contraseña actual para confirmar" });
-    }
-
-    try {
-        const userQuery = 'SELECT * FROM usuarios WHERE nombre_usuario = $1';
-        const userResult = await db.query(userQuery, [usuario_actual]);
-
-        if (userResult.rows.length === 0) {
-            return res.status(404).json({ status: "error", mensaje: "Usuario no encontrado" });
-        }
-
-        const user = userResult.rows[0];
-        const match = await bcrypt.compare(contra_actual, user.contra);
-        if (!match) {
-            return res.status(401).json({ status: "error", mensaje: "La contraseña actual es incorrecta" });
-        }
-        let passwordFinal = null;
-        if (nueva_contra) {
-            passwordFinal = await bcrypt.hash(nueva_contra, 10);
-        }
-
-        const updateQuery = 'SELECT * FROM actualizar_perfil_usuario($1, $2, $3)';
-        const updateResult = await db.query(updateQuery, [
-            user.id_usuario, 
-            nuevo_nombre || null, 
-            passwordFinal
-        ]);
-
-        const { mensaje, exito } = updateResult.rows[0];
-        res.status(exito ? 200 : 400).json({ status: exito ? "ok" : "error", mensaje });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ status: "error", mensaje: "Error interno del servidor" });
-    }
-});
 module.exports = router; 
