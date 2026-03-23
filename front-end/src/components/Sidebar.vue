@@ -145,8 +145,18 @@ const handleLogout = () => {
 
     </nav>
 
-    <!-- Footer: logout -->
+    <!-- Footer: perfil + logout -->
     <div class="sidebar-footer">
+      <RouterLink to="/perfil" class="perfil-link" :title="isCollapsed ? 'Mi perfil' : ''">
+        <span class="nav-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span v-if="!isCollapsed" class="perfil-nombre-text">{{ authStore.nombreUsuario ?? 'Mi perfil' }}</span>
+      </RouterLink>
+
       <button @click="handleLogout" class="logout-btn" :title="isCollapsed ? 'Cerrar sesión' : ''">
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none">
@@ -310,6 +320,47 @@ const handleLogout = () => {
 .sidebar-footer {
   padding: var(--espacio-3, 12px) var(--espacio-2, 8px);
   border-top: 1px solid var(--color-oscuro-borde, #2e2420);
+  display: flex;
+  flex-direction: column;
+  gap: var(--espacio-1, 4px);
+}
+
+/* Link de perfil propio */
+.perfil-link {
+  display: flex;
+  align-items: center;
+  gap: var(--espacio-3, 12px);
+  padding: var(--espacio-2, 8px) var(--espacio-3, 12px);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--color-oscuro-texto-muted, #9a8070);
+  font-size: var(--font-size-sm, 13px);
+  font-weight: var(--font-weight-medium, 500);
+  transition: background 0.15s, color 0.15s;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.perfil-link:hover {
+  background: rgba(255,255,255,0.05);
+  color: var(--color-oscuro-texto, #f0ebe5);
+}
+
+.perfil-link.router-link-active {
+  background: rgba(194, 96, 10, 0.15);
+  color: var(--tenant-primario, #c2600a);
+}
+
+.sidebar.collapsed .perfil-link {
+  justify-content: center;
+  padding: var(--espacio-2, 8px);
+  gap: 0;
+}
+
+.perfil-nombre-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
 }
 
 .logout-btn {
