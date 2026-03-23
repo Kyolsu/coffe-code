@@ -62,6 +62,63 @@ router.put('/modificar/:id', verificarToken, async (req, res) => {
         });
     }
 });
+//ver clientes activos
+router.get('/mostrar-activos', async (req, res) => {
+    try {
+        const query = 'Select * from v_clientes_activos';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay clientes activos",
+                datos: []
+            });
+        }
+
+    
+        res.json({
+            status: "ok",
+            mensaje: "Lista de clientes activos",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener clientes activos:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener clientes" 
+        });
+    }
+});
+//ver clientes inactivos
+router.get('/mostrar-inactivos', async (req, res) => {
+    try {
+        const query = 'select*from clientes where activo is false';       
+        const result = await db.query(query);
+
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay clientes inactivos",
+                datos: []
+            });
+        }
+
+        res.json({
+            status: "ok",
+            mensaje: "Lista de clientes inactivos",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener clientes inactivos:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener clientes" 
+        });
+    }
+});
 
 // Vincular RFID 
 router.put('/asignar-rfid', async (req, res) => {
