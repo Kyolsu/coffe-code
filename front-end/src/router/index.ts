@@ -95,6 +95,13 @@ const router = createRouter({
       component: () => import('../views/Personalizacion.vue'),
       meta: { requiresAuth: true, roles: ['admin'] },
     },
+    {
+      // Perfil propio — accesible para todos los roles autenticados
+      path: '/perfil',
+      name: 'perfil',
+      component: () => import('../views/Perfil.vue'),
+      meta: { requiresAuth: true, roles: ['admin', 'gerente', 'cajero', 'cocinero'] },
+    },
 
     // ── CATCH-ALL ────────────────────────────────────────────────────────────
     {
