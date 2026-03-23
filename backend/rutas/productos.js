@@ -8,7 +8,7 @@ const verificarToken = require('../middleware/auth');
 
 //ALTA DE PRODUCTO
 // POST: http://localhost:3000/api/productos/alta
-router.post('/alta', verificarToken, async (req, res) => {
+router.post('/agregar', verificarToken, async (req, res) => {
     try {
 
         const { nombre, descripcion, precio, id_zona, id_categoria, url_imagen } = req.body;
@@ -51,7 +51,159 @@ router.post('/alta', verificarToken, async (req, res) => {
     }
 });
 //BAJA Producto
+router.delete('/desactivar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const query = 'SELECT fn_baja_producto($1)';
+        await db.query(query, [id]);
+        res.json({
+            status: "ok",
+            mensaje: "Producto marcado como no disponible exitosamente",
+            id_producto: id
+        });
 
+    } catch (err) {
+        console.error("Error al dar de baja el producto:", err.message);
+
+        if (err.message.includes('Producto no encontrado')) {
+            return res.status(404).json({
+                status: "error",
+                mensaje: "El producto que intentas dar de baja no existe en la base de datos"
+            });
+        }
+
+        // Error genérico del servidor
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la baja del producto"
+        });
+    }
+});
+//MODIFICAR PRODUCTO 
+
+router.put('/modificar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { 
+            nombre, 
+            descripcion, 
+            precio, 
+            id_zona, 
+            id_categoria, 
+            url_imagen, 
+            disponibilidad 
+        } = req.body;
+
+        if (!nombre || !precio || !id_zona || !id_categoria) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "Faltan campos obligatorios para actualizar el producto"
+            });
+        }
+        const query = `
+            SELECT fn_actualizar_producto($1, $2, $3, $4, $5, $6, $7, $8) AS resultado
+        `;
+        const values = [
+            id,
+            nombre,
+            descripcion || null,
+            precio,
+            id_zona,
+            id_categoria,
+            url_imagen || null,
+            disponibilidad !== undefined ? disponibilidad : true
+        ];
+
+        const result = await db.query(query, values);
+        const mensajeRecibido = result.rows[0].resultado;
+        if (mensajeRecibido === 'Producto no existe') {
+            return res.status(404).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: "Producto actualizado correctamente",
+            datos: { id, nombre, precio, disponibilidad }
+        });
+
+    } catch (err) {
+        console.error("Error al actualizar producto:", err.message);
+
+        // Error de llave foránea (si id_zona o id_categoria no existen)
+        if (err.code === '23503') {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "La zona o categoría seleccionada no es válida"
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar actualizar el producto"
+        });
+    }
+});
+
+//Mostrar producto 
+
+router.get('/mostrar', async (req, res) => {
+    try {
+        const query = 'Select * from v_productos';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay productos",
+                datos: []
+            });
+        }
+
+    
+        res.json({
+            status: "ok",
+            mensaje: "Lista de productos",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener productos:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener productos" 
+        });
+    }
+}); 
+//Mostrar productos inactivos
+router.get('/mostrar-inactivo', async (req, res) => {
+    try {
+        const query = 'Select * from productos where disponibilidad is false';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay productos inactivos",
+                datos: []
+            });
+        }
+    
+        res.json({
+            status: "ok",
+            mensaje: "Lista de productos inactivos",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener productos inactivos:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener productos" 
+        });
+    }
+}); 
 ///INGREDIENTES
 //ALTA INGREDIENTE
 router.post('/ingrediente/agregar', verificarToken, async (req, res) => {
