@@ -179,7 +179,7 @@ const irAMenu = () => router.push({ name: 'menu' })
 .dashboard-layout {
   display: flex;
   min-height: 100vh;
-  background-color: var(--tenant-fondo, #000);
+  background-color: var(--tenant-fondo, #f5f0eb);
 }
 
 /* ── CONTENT ── */
@@ -209,7 +209,7 @@ const irAMenu = () => router.push({ name: 'menu' })
 .header-greeting {
   margin: 0;
   font-size: var(--font-size-sm, 13px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--tenant-texto-muted, #7c6a5a);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-weight: var(--font-weight-medium, 500);
@@ -219,34 +219,35 @@ const irAMenu = () => router.push({ name: 'menu' })
   margin: 0;
   font-size: var(--font-size-2xl, 30px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto, #1c1410);
   line-height: 1.1;
 }
 
 .accent {
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario, #c2600a);
 }
 
 .user-profile {
   display: flex;
   align-items: center;
   gap: var(--espacio-3, 12px);
-  background: #111;
-  border: 1px solid #222;
+  background: var(--color-superficie, #fff);
+  border: 1px solid var(--color-borde, #e8ddd5);
   border-radius: 50px;
   padding: var(--espacio-2, 8px) var(--espacio-4, 16px) var(--espacio-2, 8px) var(--espacio-2, 8px);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
 }
 
 .profile-avatar {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #1e1e1e;
-  border: 1.5px solid #333;
+  background: rgba(194, 96, 10, 0.1);
+  border: 1.5px solid rgba(194, 96, 10, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario, #c2600a);
   flex-shrink: 0;
 }
 
@@ -264,13 +265,13 @@ const irAMenu = () => router.push({ name: 'menu' })
 .profile-name {
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto, #1c1410);
   line-height: 1;
 }
 
 .profile-role {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--tenant-texto-muted, #7c6a5a);
   line-height: 1;
 }
 
@@ -285,13 +286,13 @@ const irAMenu = () => router.push({ name: 'menu' })
 
 /* ── CARDS ── */
 .card {
-  background-color: #0e0e0e;
-  border: 1px solid #1c1c1c;
+  background-color: var(--color-superficie, #fff);
+  border: 1px solid var(--color-borde, #e8ddd5);
   border-radius: 16px;
   padding: var(--espacio-5, 20px);
   display: flex;
   flex-direction: column;
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto, #1c1410);
   transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
   position: relative;
   overflow: hidden;
@@ -304,7 +305,7 @@ const irAMenu = () => router.push({ name: 'menu' })
   border-radius: 16px;
   opacity: 0;
   transition: opacity 0.2s;
-  background: radial-gradient(circle at 30% 30%, rgba(63, 153, 255, 0.04), transparent 60%);
+  background: radial-gradient(circle at 30% 30%, rgba(194, 96, 10, 0.03), transparent 60%);
 }
 
 .clickable {
@@ -313,8 +314,8 @@ const irAMenu = () => router.push({ name: 'menu' })
 
 .clickable:hover {
   transform: translateY(-3px);
-  border-color: #2a2a2a;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  border-color: var(--tenant-primario, #c2600a);
+  box-shadow: 0 8px 24px rgba(194, 96, 10, 0.1);
 }
 
 .clickable:hover::before {
@@ -325,12 +326,12 @@ const irAMenu = () => router.push({ name: 'menu' })
   font-size: var(--font-size-xs, 11px);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--tenant-texto-muted, #7c6a5a);
   font-weight: var(--font-weight-medium, 500);
   margin-bottom: var(--espacio-3, 12px);
 }
 
-/* Action cards (Vista Pública, Clientes, Productos) */
+/* Action cards */
 .card--action {
   flex-direction: row;
   align-items: center;
@@ -358,40 +359,40 @@ const irAMenu = () => router.push({ name: 'menu' })
 }
 
 .card-icon--globe {
-  background: rgba(63, 153, 255, 0.1);
-  color: var(--tenant-primario, #3f99ff);
+  background: rgba(194, 96, 10, 0.1);
+  color: var(--tenant-primario, #c2600a);
 }
 
 .card-icon--sale {
-  background: rgba(34, 197, 94, 0.1);
+  background: rgba(22, 163, 74, 0.1);
   color: var(--color-exitoso, #16a34a);
 }
 
 .card-icon--clients {
-  background: rgba(245, 158, 11, 0.1);
-  color: var(--color-advertencia, #d9a106);
+  background: rgba(217, 119, 6, 0.1);
+  color: var(--color-advertencia, #d97706);
 }
 
 .card-icon--products {
-  background: rgba(107, 114, 128, 0.15);
-  color: #9ca3af;
+  background: rgba(107, 114, 128, 0.1);
+  color: #6b7280;
 }
 
 .card-title {
   margin: 0 0 2px;
   font-size: var(--font-size-base, 15px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto, #1c1410);
 }
 
 .card-desc {
   margin: 0;
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--tenant-texto-muted, #7c6a5a);
 }
 
 .card-arrow {
-  color: #333;
+  color: var(--color-borde, #e8ddd5);
   width: 18px;
   height: 18px;
   flex-shrink: 0;
@@ -404,18 +405,18 @@ const irAMenu = () => router.push({ name: 'menu' })
 }
 
 .clickable:hover .card-arrow {
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario, #c2600a);
   transform: translateX(3px);
 }
 
 /* CTA card (Iniciar Venta) */
 .card--cta {
-  border-color: rgba(22, 163, 74, 0.25);
-  background: linear-gradient(135deg, #0e0e0e 0%, rgba(22, 163, 74, 0.04) 100%);
+  border-color: rgba(22, 163, 74, 0.3);
+  background: linear-gradient(135deg, #fff 0%, rgba(22, 163, 74, 0.04) 100%);
 }
 
 .card--cta:hover {
-  border-color: rgba(22, 163, 74, 0.5) !important;
+  border-color: rgba(22, 163, 74, 0.6) !important;
 }
 
 /* Product card */
@@ -445,14 +446,14 @@ const irAMenu = () => router.push({ name: 'menu' })
 .product-name {
   font-size: var(--font-size-md, 17px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto, #1c1410);
 }
 
 .product-badge {
   display: inline-block;
-  background: rgba(63, 153, 255, 0.12);
-  color: var(--tenant-primario, #3f99ff);
-  border: 1px solid rgba(63, 153, 255, 0.2);
+  background: rgba(194, 96, 10, 0.1);
+  color: var(--tenant-primario, #c2600a);
+  border: 1px solid rgba(194, 96, 10, 0.2);
   border-radius: 20px;
   padding: 2px 10px;
   font-size: var(--font-size-xs, 11px);
@@ -490,7 +491,7 @@ const irAMenu = () => router.push({ name: 'menu' })
 
 .chart-labels span {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--tenant-texto-muted, #7c6a5a);
 }
 
 /* ── WATERMARK ── */
@@ -507,7 +508,7 @@ const irAMenu = () => router.push({ name: 'menu' })
 
 .watermark-label {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: var(--tenant-texto-muted, #7c6a5a);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -515,7 +516,7 @@ const irAMenu = () => router.push({ name: 'menu' })
 .watermark-brand {
   font-size: var(--font-size-md, 17px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario, #c2600a);
   letter-spacing: -0.02em;
 }
 </style>
