@@ -388,4 +388,82 @@ router.get('/permisos/mostrar', verificarToken, async (req, res) => {
     }
 });
 
+router.post('/permisos/asignar', verificarToken, async (req, res) => {
+    try {
+        const { id_rol, id_permiso } = req.body;
+        const query = 'SELECT fn_asignar_permiso($1, $2) AS asignado';
+        const result = await db.query(query, [id_rol, id_permiso]);
+
+        if (!result.rows[0].asignado) {
+            return res.status(400).json({ status: "error", mensaje: "Ese permiso ya estaba asignado a este rol" });
+        }
+
+        res.status(201).json({ status: "ok", mensaje: "Permiso asignado exitosamente" });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ status: "error", mensaje: "Error al asignar permiso" });
+    }
+});
+
+//BORRAR
+router.delete('/permisos/quitar', verificarToken, async (req, res) => {
+    try {
+        const { id_rol, id_permiso } = req.query; 
+        const query = 'SELECT fn_quitar_permiso($1, $2) AS quitado';
+        const result = await db.query(query, [id_rol, id_permiso]);
+
+        if (!result.rows[0].quitado) {
+            return res.status(404).json({ status: "error", mensaje: "No se encontró esa asignación para eliminar" });
+        }
+
+        res.json({ status: "ok", mensaje: "Permiso retirado del rol correctamente" });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ status: "error", mensaje: "Error al quitar permiso" });
+    }
+});
+
+router.put('/permisos/cambiar', verificarToken, async (req, res) => {
+    try {
+        const { id_rol, id_permiso_viejo, id_permiso_nuevo } = req.body;
+        const query = 'SELECT fn_cambiar_permiso($1, $2, $3) AS cambiado';
+        const result = await db.query(query, [id_rol, id_permiso_viejo, id_permiso_nuevo]);
+
+        if (!result.rows[0].cambiado) {
+            return res.status(404).json({ status: "error", mensaje: "No se pudo realizar el cambio de permiso" });
+        }
+
+        res.json({ status: "ok", mensaje: "Asignación actualizada correctamente" });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ status: "error", mensaje: "Error al modificar permiso" });
+    }
+});
+
+router.get('/permisos/roles/mostrar', verificarToken, async (req, res) => {
+    try {
+        const query = 'select *  from v_roles_permisos'; 
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay ningun permiso disponible",
+                datos: []
+            });
+        }
+
+        res.json({
+            status: "ok",
+            mensaje: "Lista de permisos obtenidos",
+            datos: result.rows
+        });
+    } catch (err) {
+        console.error("Error con el servidor:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al consultar" 
+        });
+    }
+});
+
 module.exports = router;
