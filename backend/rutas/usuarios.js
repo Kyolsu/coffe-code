@@ -264,20 +264,15 @@ router.put('/rol/modificar/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
         const { nombre_rol, descripcion } = req.body;
-
-        // Validación: El nombre es obligatorio para mantener la integridad
         if (!nombre_rol) {
             return res.status(400).json({ 
                 status: "error", 
                 mensaje: "El nombre del rol es requerido para la actualización" 
             });
         }
-
-        // Llamamos a la función de edición
         const query = 'SELECT fn_editar_rol($1, $2, $3) AS actualizado';
         const result = await db.query(query, [id, nombre_rol, descripcion]);
 
-        // Verificamos si la función encontró el registro (retornó true)
         if (!result.rows[0].actualizado) {
             return res.status(404).json({ 
                 status: "error", 
@@ -296,6 +291,99 @@ router.put('/rol/modificar/:id', verificarToken, async (req, res) => {
         res.status(500).json({ 
             status: "error", 
             mensaje: "Error interno al intentar actualizar el rol" 
+        });
+    }
+});
+//Agregar permiso
+router.post('/permisos/agregar', verificarToken, async (req, res) => {
+    try {
+        const { nombre_permiso } = req.body;
+        if (!nombre_permiso) {
+            return res.status(400).json({ status: "error", mensaje: "El nombre del permiso es obligatorio" });
+        }
+
+        const query = 'SELECT fn_alta_permiso($1) AS nuevo_id';
+        const result = await db.query(query, [nombre_permiso]);
+
+        res.status(201).json({
+            status: "ok",
+            mensaje: "Permiso creado correctamente",
+            id: result.rows[0].nuevo_id
+        });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ status: "error", mensaje: "Error al crear el permiso" });
+    }
+});
+
+// Modificar permiso
+router.put('/permisos/modificar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre_permiso } = req.body;
+
+        const query = 'SELECT fn_editar_permiso($1, $2) AS actualizado';
+        const result = await db.query(query, [id, nombre_permiso]);
+
+        if (!result.rows[0].actualizado) {
+            return res.status(404).json({ status: "error", mensaje: "No se encontró el permiso para editar" });
+        }
+
+        res.json({ status: "ok", mensaje: "Permiso actualizado correctamente" });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ status: "error", mensaje: "Error al actualizar el permiso" });
+    }
+});
+
+// ELIMINAR PERMISO
+router.delete('/permisos/eliminar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const query = 'SELECT fn_baja_permiso($1) AS eliminado';
+        const result = await db.query(query, [id]);
+
+        if (!result.rows[0].eliminado) {
+            return res.status(404).json({ status: "error", mensaje: "El permiso no existe" });
+        }
+
+        res.json({ status: "ok", mensaje: "Permiso eliminado correctamente" });
+    } catch (err) {
+        console.error(err.message);
+
+        if (err.code === '23503') {
+            return res.status(400).json({ 
+                status: "error", 
+                mensaje: "No se puede borrar este permiso porque ya está asignado a un rol." 
+            });
+        }
+        res.status(500).json({ status: "error", mensaje: "Error al eliminar el permiso" });
+    }
+});
+
+router.get('/permisos/mostrar', verificarToken, async (req, res) => {
+    try {
+        const query = 'select *  from v_permisos'; 
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay ningun permiso disponible",
+                datos: []
+            });
+        }
+
+        res.json({
+            status: "ok",
+            mensaje: "Lista de permisos obtenidos",
+            datos: result.rows
+        });
+    } catch (err) {
+        console.error("Error con el servidor:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al consultar" 
         });
     }
 });
