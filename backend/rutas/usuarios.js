@@ -134,6 +134,32 @@ router.get('/perfil', verificarToken, async (req, res) => {
     }
 });
 
+// Mostrar todos los usuarios
+router.get('/todos-usuarios',verificarToken, async (req, res) => {
+    try {
+        const query = 'Select * from v_usuarios_roles';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay usuarios que mostrar",
+                datos: []
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: "Lista de usuarios",
+            datos: result.rows
+        });
+    } catch (err) {
+        console.error("Error al obtener los usuarios:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener usuarios" 
+        });
+    }
+}); 
 // Endpoint de Login
 router.post('/login', async (req, res) => {
     const { usuario, contra } = req.body;
