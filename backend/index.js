@@ -21,4 +21,5 @@ app.use('/api/productos',ProductosRutas);
 app.use('/api/menu',menuRutas);
 app.listen(port, () => {
   console.log(`Servidor corriendo en http://localhost:${port}`);
+}); 
 });

@@ -50,7 +50,179 @@ router.post('/alta', verificarToken, async (req, res) => {
         });
     }
 });
+//BAJA Producto
 
+///INGREDIENTES
+//ALTA INGREDIENTE
+router.post('/ingrediente/agregar', verificarToken, async (req, res) => {
+    try {
+        const { nombre, tipo, precio } = req.body;
+        if (!nombre || !tipo) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "El nombre y el tipo de ingrediente son obligatorios."
+            });
+        }
+
+        const query = 'SELECT fn_alta_ingrediente($1, $2, $3) AS nuevo_id';
+        const values = [nombre, tipo, precio || 0];
+
+        const result = await db.query(query, values);
+        const idGenerado = result.rows[0].nuevo_id;
+
+        res.status(201).json({
+            status: "ok",
+            mensaje: "Ingrediente registrado correctamente",
+            datos: {
+                id_ingrediente: idGenerado,
+                nombre,
+                tipo,
+                precio_adicional: precio || 0
+            }
+        });
+
+    } catch (err) {
+        console.error("Error al crear ingrediente:", err.message);
+        if (err.message.includes('precio no puede ser negativo')) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: err.message
+            });
+        }
+        //si el 'tipo' enviado no existe en PostgreSQL
+        if (err.code === '22P02') {
+            return res.status(400).json({
+                status: "error",
+                mensaje: `El tipo '${req.body.tipo}' no es válido. Revisa los valores permitidos en el ENUM.`
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar el alta del ingrediente"
+        });
+    }
+});
+//Baja ingrediente
+router.delete('/ingrediente/desactivar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const query = 'SELECT fn_baja_ingrediente($1) AS resultado';
+        const result = await db.query(query, [id]);
+
+        const mensajeRecibido = result.rows[0].resultado;
+
+        if (mensajeRecibido === 'El ingrediente no existe') {
+            return res.status(404).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+        if (mensajeRecibido === 'El ingrediente ya está inactivo') {
+            return res.status(400).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: mensajeRecibido,
+            id_desactivado: id
+        });
+
+    } catch (err) {
+        console.error("Error al desactivar ingrediente:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar procesar la baja del ingrediente"
+        });
+    }
+});
+//Modificar ingredientes
+router.put('/ingrediente/actualizar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre, tipo, precio, activo } = req.body;
+        const query = `
+            SELECT fn_actualizar_ingrediente($1, $2, $3, $4, $5) AS resultado
+        `;
+        
+        const values = [
+            id,
+            nombre || null,
+            tipo || null,
+            precio !== undefined ? precio : null,
+            activo !== undefined ? activo : null
+        ];
+
+        const result = await db.query(query, values);
+        const mensajeRecibido = result.rows[0].resultado;
+
+        if (mensajeRecibido === 'El ingrediente no existe') {
+            return res.status(404).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+
+        if (mensajeRecibido === 'Precio inválido') {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "El precio no puede ser un valor negativo."
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: mensajeRecibido,
+            datos_enviados: { id, ...req.body }
+        });
+
+    } catch (err) {
+        console.error("Error al actualizar ingrediente:", err.message);
+        if (err.code === '22P02') {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "El tipo de ingrediente enviado no es válido."
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar actualizar el ingrediente"
+        });
+    }
+});
+
+//Mostrar ingredientes
+router.get('/ingredientes/mostrar', async (req, res) => {
+    try {
+        const query = 'Select * from v_ingredientes';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay ingredientes",
+                datos: []
+            });
+        }
+
+    
+        res.json({
+            status: "ok",
+            mensaje: "Lista de ingredientes",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener ingredientes:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener ingredientes" 
+        });
+    }
+}); 
 module.exports = router; 
 
 
