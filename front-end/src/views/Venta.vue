@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Sidebar from '../components/Sidebar.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const authStore = useAuthStore()
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
 // ── TIPOS ──────────────────────────────────────────────
 interface CartItem {
@@ -13,50 +16,78 @@ interface CartItem {
   unitPrice: number
 }
 
-interface Product {
-  id: number
-  name: string
-  price: number
-  category: string
-  emoji: string
+interface Producto {
+  id_producto: number
+  nombre_producto: string
+  precio_base: number
+  id_categoria: number
+  url_imagen: string
+}
+
+interface Categoria {
+  id_categoria: number
+  nombre: string
 }
 
 // ── ESTADO ─────────────────────────────────────────────
 
 // Carrito
-const cart = ref<CartItem[]>([
-  // Mock inicial — reemplazar con datos de API
-  { id: 1, name: 'Chilaquiles',    qty: 1, unitPrice: 40 },
-  { id: 2, name: 'Plato de fruta', qty: 3, unitPrice: 20 },
-])
+const cart = ref<CartItem[]>([])
 
-// Categorías de productos
-const categories = ref(['Platillos', 'Bebidas', 'Extras', 'Paquetes'])
-const activeCategory = ref('Platillos')
+// Categorías de productos reales
+const categorias = ref<Categoria[]>([])
+const activeCategoryId = ref<number>(0) // 0 representará "Todos"
 
 // Búsqueda
 const searchQuery = ref('')
 
-// Productos mock — reemplazar con fetch a API
-const allProducts = ref<Product[]>([
-  { id: 1,  name: 'Chilaquiles',    price: 40,  category: 'Platillos', emoji: '🍳' },
-  { id: 2,  name: 'Enchiladas',     price: 55,  category: 'Platillos', emoji: '🌮' },
-  { id: 3,  name: 'Huevos rancheros', price: 45, category: 'Platillos', emoji: '🍳' },
-  { id: 4,  name: 'Plato de fruta', price: 20,  category: 'Platillos', emoji: '🍓' },
-  { id: 5,  name: 'Café americano', price: 30,  category: 'Bebidas',   emoji: '☕' },
-  { id: 6,  name: 'Cappuccino',     price: 38,  category: 'Bebidas',   emoji: '☕' },
-  { id: 7,  name: 'Jugo de naranja',price: 25,  category: 'Bebidas',   emoji: '🍊' },
-  { id: 8,  name: 'Agua mineral',   price: 18,  category: 'Bebidas',   emoji: '💧' },
-  { id: 9,  name: 'Extra queso',    price: 10,  category: 'Extras',    emoji: '🧀' },
-  { id: 10, name: 'Extra crema',    price: 8,   category: 'Extras',    emoji: '🥛' },
-  { id: 11, name: 'Paquete desayuno', price: 90, category: 'Paquetes', emoji: '🍽️' },
-])
+// Productos reales de la API
+const allProducts = ref<Producto[]>([])
 
+// ── FETCH DATOS REALES ─────────────────────────────────
+const fetchCategorias = async () => {
+  try {
+    const res = await fetch(`${API_URL}/api/tienda/categorias/mostrar`)
+    const data = await res.json()
+    const cats = data.status === 'ok' ? (data.datos || []).map((c: any) => ({
+      id_categoria: c.id_categoria || c.id,
+      nombre: c.nombre_categoria || c.nombre || c.categoria || 'Sin nombre'
+    })) : []
+    
+    // Agregamos "Todos" al inicio de la lista
+    categorias.value = [{ id_categoria: 0, nombre: 'Todos' }, ...cats]
+  } catch (error) { console.error("Error categorías:", error) }
+}
+
+const fetchProductos = async () => {
+  try {
+    const res = await fetch(`${API_URL}/api/productos/mostrar`, {
+      headers: authStore.authHeaders()
+    })
+    const data = await res.json()
+    allProducts.value = data.status === 'ok' ? (data.datos || []).map((p: any) => ({
+      id_producto: p.id_producto || p.id,
+      nombre_producto: p.nombre_producto || p.nombre || 'Producto',
+      precio_base: Number(p.precio_base || p.precio || 0),
+      id_categoria: p.id_categoria || 0,
+      url_imagen: p.url_imagen || ''
+    })) : []
+  } catch (error) { console.warn("Error productos:", error) }
+}
+
+onMounted(() => {
+  fetchCategorias()
+  fetchProductos()
+})
+
+// ── COMPUTADOS (Filtro Funcional) ──────────────────────
 const filteredProducts = computed(() => {
-  const q = searchQuery.value.toLowerCase()
   return allProducts.value.filter(p => {
-    const matchCat = p.category === activeCategory.value
-    const matchSearch = q ? p.name.toLowerCase().includes(q) : true
+    // Coincidir categoría (0 = Todos)
+    const matchCat = activeCategoryId.value === 0 || p.id_categoria === activeCategoryId.value
+    // Coincidir búsqueda
+    const matchSearch = p.nombre_producto.toLowerCase().includes(searchQuery.value.toLowerCase())
+    
     return matchCat && matchSearch
   })
 })
@@ -83,12 +114,17 @@ const iva      = computed(() => Math.round(taxBase.value * IVA_RATE))
 const total    = computed(() => taxBase.value + iva.value)
 
 // ── ACCIONES DEL CARRITO ────────────────────────────────
-const addToCart = (product: Product) => {
-  const existing = cart.value.find(i => i.id === product.id)
+const addToCart = (product: Producto) => {
+  const existing = cart.value.find(i => i.id === product.id_producto)
   if (existing) {
     existing.qty++
   } else {
-    cart.value.push({ id: product.id, name: product.name, qty: 1, unitPrice: product.price })
+    cart.value.push({ 
+      id: product.id_producto, 
+      name: product.nombre_producto, 
+      qty: 1, 
+      unitPrice: product.precio_base 
+    })
   }
 }
 
@@ -115,14 +151,12 @@ const processPay = () => { /* TODO: POST /pagos */ }
 
     <div class="venta-main">
 
-      <!-- ── PANEL IZQUIERDO: Carrito ── -->
       <section class="panel panel--cart">
         <div class="panel-header">
           <span class="panel-title">Ticket</span>
           <span class="ticket-badge"># —</span>
         </div>
 
-        <!-- Items del carrito -->
         <div class="cart-items">
           <div v-if="cart.length === 0" class="cart-empty">
             <svg viewBox="0 0 24 24" fill="none"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><line x1="3" y1="6" x2="21" y2="6" stroke="currentColor" stroke-width="1.5"/><path d="M16 10a4 4 0 01-8 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -147,7 +181,6 @@ const processPay = () => { /* TODO: POST /pagos */ }
           </div>
         </div>
 
-        <!-- Totales -->
         <div class="cart-totals">
           <div class="totals-breakdown">
             <div class="totals-row">
@@ -169,7 +202,6 @@ const processPay = () => { /* TODO: POST /pagos */ }
           </div>
         </div>
 
-        <!-- Acciones -->
         <div class="cart-actions">
           <div class="actions-row actions-row--top">
             <button class="btn btn--ghost" @click="clearCart">
@@ -193,7 +225,6 @@ const processPay = () => { /* TODO: POST /pagos */ }
               Cancelar
             </button>
 
-            <!-- Pago con dropdown de método -->
             <div class="payment-group">
               <button class="btn btn--payment" @click="processPay">
                 <svg viewBox="0 0 24 24" fill="none"><rect x="2" y="5" width="20" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M2 10h20" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -229,7 +260,6 @@ const processPay = () => { /* TODO: POST /pagos */ }
         </div>
       </section>
 
-      <!-- ── PANEL DERECHO: Productos ── -->
       <section class="panel panel--products">
         <div class="products-top">
           <div class="search-bar">
@@ -244,17 +274,16 @@ const processPay = () => { /* TODO: POST /pagos */ }
           <h2 class="venta-title">Venta</h2>
         </div>
 
-        <!-- Categorías -->
         <div class="categories-bar">
           <div class="categories-scroll">
             <button
-              v-for="cat in categories"
-              :key="cat"
+              v-for="cat in categorias"
+              :key="cat.id_categoria"
               class="cat-chip"
-              :class="{ active: activeCategory === cat }"
-              @click="activeCategory = cat"
+              :class="{ active: activeCategoryId === cat.id_categoria }"
+              @click="activeCategoryId = cat.id_categoria"
             >
-              {{ cat }}
+              {{ cat.nombre }}
             </button>
           </div>
           <button class="cat-add" title="Agregar categoría">
@@ -262,17 +291,18 @@ const processPay = () => { /* TODO: POST /pagos */ }
           </button>
         </div>
 
-        <!-- Grid de productos -->
         <div class="product-grid">
           <button
             v-for="product in filteredProducts"
-            :key="product.id"
+            :key="product.id_producto"
             class="product-card"
             @click="addToCart(product)"
           >
-            <span class="product-emoji">{{ product.emoji }}</span>
-            <span class="product-name">{{ product.name }}</span>
-            <span class="product-price">${{ product.price }}</span>
+            <img v-if="product.url_imagen" :src="product.url_imagen" class="product-img" />
+            <span v-else class="product-emoji">🍽️</span>
+            
+            <span class="product-name">{{ product.nombre_producto }}</span>
+            <span class="product-price">${{ product.precio_base.toFixed(2) }}</span>
           </button>
 
           <div v-if="filteredProducts.length === 0" class="product-empty">
@@ -290,7 +320,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
 .venta-layout {
   display: flex;
   min-height: 100vh;
-  background-color: var(--tenant-fondo, #000);
+  background-color: var(--tenant-fondo);
 }
 
 .venta-main {
@@ -304,8 +334,8 @@ const processPay = () => { /* TODO: POST /pagos */ }
 
 /* ── PANELES ── */
 .panel {
-  background: #0e0e0e;
-  border: 1px solid #1c1c1c;
+  background: color-mix(in srgb, var(--tenant-fondo) 95%, black 5%);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   border-radius: 20px;
   display: flex;
   flex-direction: column;
@@ -331,7 +361,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
   align-items: center;
   justify-content: space-between;
   padding: var(--espacio-4, 16px) var(--espacio-5, 20px);
-  border-bottom: 1px solid #1a1a1a;
+  border-bottom: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
 }
 
 .panel-title {
@@ -339,16 +369,16 @@ const processPay = () => { /* TODO: POST /pagos */ }
   font-weight: var(--font-weight-bold, 600);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 
 .ticket-badge {
   font-size: var(--font-size-xs, 11px);
-  background: #181818;
-  border: 1px solid #2a2a2a;
+  background: color-mix(in srgb, var(--tenant-texto) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 15%, transparent);
   border-radius: 20px;
   padding: 2px 10px;
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 
 /* ── ITEMS DEL CARRITO ── */
@@ -369,7 +399,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
   align-items: center;
   justify-content: center;
   gap: var(--espacio-3, 12px);
-  color: #2a2a2a;
+  color: color-mix(in srgb, var(--tenant-texto) 20%, transparent);
   padding: var(--espacio-8, 32px) 0;
 }
 
@@ -389,20 +419,20 @@ const processPay = () => { /* TODO: POST /pagos */ }
   align-items: center;
   gap: var(--espacio-2, 8px);
   padding: var(--espacio-2, 8px) var(--espacio-3, 12px);
-  background: #111;
-  border: 1px solid #1c1c1c;
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   border-radius: 10px;
   transition: border-color 0.15s;
 }
 
 .cart-item:hover {
-  border-color: #2a2a2a;
+  border-color: color-mix(in srgb, var(--tenant-texto) 20%, transparent);
 }
 
 .item-name {
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-medium, 500);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -410,15 +440,15 @@ const processPay = () => { /* TODO: POST /pagos */ }
 
 .item-qty {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
-  background: #1a1a1a;
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
+  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
   border-radius: 4px;
   padding: 1px 6px;
 }
 
 .item-unit {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 
 .item-btn {
@@ -441,32 +471,32 @@ const processPay = () => { /* TODO: POST /pagos */ }
 }
 
 .item-btn--edit {
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 .item-btn--edit:hover {
-  background: #1a1a1a;
-  color: var(--tenant-primario, #3f99ff);
+  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
+  color: var(--tenant-primario);
 }
 
 .item-btn--delete {
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 .item-btn--delete:hover {
-  background: rgba(220, 38, 38, 0.1);
+  background: color-mix(in srgb, var(--color-error, #dc2626) 10%, transparent);
   color: var(--color-error, #dc2626);
 }
 
 .item-total {
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
   min-width: 36px;
   text-align: right;
 }
 
 /* ── TOTALES ── */
 .cart-totals {
-  border-top: 1px solid #1a1a1a;
+  border-top: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
   padding: var(--espacio-4, 16px) var(--espacio-5, 20px);
   display: flex;
   flex-direction: column;
@@ -483,7 +513,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
   display: flex;
   justify-content: space-between;
   font-size: var(--font-size-sm, 13px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 
 .totals-discount {
@@ -494,8 +524,8 @@ const processPay = () => { /* TODO: POST /pagos */ }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #111;
-  border: 1px solid #222;
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   border-radius: 12px;
   padding: var(--espacio-3, 12px) var(--espacio-4, 16px);
 }
@@ -503,7 +533,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
 .totals-total span:first-child {
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-medium, 500);
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -511,12 +541,12 @@ const processPay = () => { /* TODO: POST /pagos */ }
 .totals-amount {
   font-size: var(--font-size-xl, 24px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
 }
 
 /* ── BOTONES DE ACCIÓN ── */
 .cart-actions {
-  border-top: 1px solid #1a1a1a;
+  border-top: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
   padding: var(--espacio-4, 16px) var(--espacio-5, 20px);
   display: flex;
   flex-direction: column;
@@ -551,35 +581,35 @@ const processPay = () => { /* TODO: POST /pagos */ }
 
 .btn--ghost {
   flex: 1;
-  background: #111;
-  border-color: #1e1e1e;
-  color: var(--tenant-texto, #fff);
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border-color: color-mix(in srgb, var(--tenant-texto) 10%, transparent);
+  color: var(--tenant-texto);
   flex-direction: column;
   gap: 2px;
   padding: var(--espacio-2, 8px) var(--espacio-3, 12px);
 }
 
 .btn--ghost:hover {
-  background: #1a1a1a;
-  border-color: #2a2a2a;
+  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
+  border-color: color-mix(in srgb, var(--tenant-texto) 15%, transparent);
 }
 
 .btn-sub {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   line-height: 1;
 }
 
 .btn--cancel {
   flex: 1;
-  background: rgba(253, 141, 141, 0.06);
-  border-color: rgba(253, 141, 141, 0.15);
+  background: color-mix(in srgb, var(--color-cancelar, #fd8d8d) 6%, transparent);
+  border-color: color-mix(in srgb, var(--color-cancelar, #fd8d8d) 15%, transparent);
   color: var(--color-cancelar, #fd8d8d);
 }
 
 .btn--cancel:hover {
-  background: rgba(253, 141, 141, 0.12);
-  border-color: rgba(253, 141, 141, 0.3);
+  background: color-mix(in srgb, var(--color-cancelar, #fd8d8d) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-cancelar, #fd8d8d) 30%, transparent);
 }
 
 /* ── PAGO ── */
@@ -591,7 +621,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
 
 .btn--payment {
   flex: 1;
-  background: var(--tenant-primario, #3f99ff);
+  background: var(--tenant-primario);
   color: #fff;
   border-color: transparent;
   border-radius: 10px 0 0 10px;
@@ -599,7 +629,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
 }
 
 .btn--payment:hover {
-  background: #2d87eb;
+  background: color-mix(in srgb, var(--tenant-primario) 80%, black 20%);
 }
 
 .payment-label {
@@ -627,7 +657,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
 
 .btn--payment-toggle {
   height: 100%;
-  background: #2d87eb;
+  background: color-mix(in srgb, var(--tenant-primario) 80%, black 20%);
   border: none;
   border-radius: 0 10px 10px 0;
   padding: 0 var(--espacio-2, 8px);
@@ -639,7 +669,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
 }
 
 .btn--payment-toggle:hover {
-  background: #1a74d8;
+  background: color-mix(in srgb, var(--tenant-primario) 60%, black 40%);
 }
 
 .btn--payment-toggle svg {
@@ -651,8 +681,8 @@ const processPay = () => { /* TODO: POST /pagos */ }
   position: absolute;
   bottom: calc(100% + 6px);
   right: 0;
-  background: #111;
-  border: 1px solid #2a2a2a;
+  background: color-mix(in srgb, var(--tenant-fondo) 90%, black 10%);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 15%, transparent);
   border-radius: 10px;
   overflow: hidden;
   min-width: 120px;
@@ -669,17 +699,17 @@ const processPay = () => { /* TODO: POST /pagos */ }
   border: none;
   cursor: pointer;
   font-size: var(--font-size-sm, 13px);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
   transition: background 0.15s;
 }
 
 .payment-menu-item:hover {
-  background: #1a1a1a;
+  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
 }
 
 .payment-menu-item.active {
-  color: var(--tenant-primario, #3f99ff);
-  background: rgba(63, 153, 255, 0.08);
+  color: var(--tenant-primario);
+  background: color-mix(in srgb, var(--tenant-primario) 8%, transparent);
 }
 
 /* ── PANEL PRODUCTOS: TOP ── */
@@ -694,21 +724,21 @@ const processPay = () => { /* TODO: POST /pagos */ }
   display: flex;
   align-items: center;
   gap: var(--espacio-3, 12px);
-  background: #111;
-  border: 1px solid #1e1e1e;
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   border-radius: 50px;
   padding: var(--espacio-2, 8px) var(--espacio-4, 16px);
   transition: border-color 0.2s;
 }
 
 .search-bar:focus-within {
-  border-color: var(--tenant-primario, #3f99ff);
+  border-color: var(--tenant-primario);
 }
 
 .search-icon {
   width: 16px;
   height: 16px;
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   flex-shrink: 0;
 }
 
@@ -716,21 +746,21 @@ const processPay = () => { /* TODO: POST /pagos */ }
   background: none;
   border: none;
   outline: none;
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
   font-size: var(--font-size-sm, 13px);
   font-family: var(--tenant-fuente, sans-serif);
   width: 100%;
 }
 
 .search-input::placeholder {
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 
 .venta-title {
   margin: 0;
   font-size: var(--font-size-2xl, 30px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
   white-space: nowrap;
 }
 
@@ -754,9 +784,9 @@ const processPay = () => { /* TODO: POST /pagos */ }
 }
 
 .cat-chip {
-  background: #111;
-  border: 1px solid #1e1e1e;
-  color: var(--tenant-texto-muted, #78716c);
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   border-radius: 50px;
   padding: var(--espacio-1, 4px) var(--espacio-4, 16px);
   font-size: var(--font-size-sm, 13px);
@@ -768,13 +798,13 @@ const processPay = () => { /* TODO: POST /pagos */ }
 }
 
 .cat-chip:hover {
-  border-color: #2a2a2a;
-  color: var(--tenant-texto, #fff);
+  border-color: color-mix(in srgb, var(--tenant-texto) 20%, transparent);
+  color: var(--tenant-texto);
 }
 
 .cat-chip.active {
-  background: var(--tenant-primario, #3f99ff);
-  border-color: var(--tenant-primario, #3f99ff);
+  background: var(--tenant-primario);
+  border-color: var(--tenant-primario);
   color: #fff;
 }
 
@@ -782,20 +812,20 @@ const processPay = () => { /* TODO: POST /pagos */ }
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: #111;
-  border: 1px solid #1e1e1e;
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   flex-shrink: 0;
   transition: background 0.15s, color 0.15s;
 }
 
 .cat-add:hover {
-  background: #1a1a1a;
-  color: var(--tenant-texto, #fff);
+  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
+  color: var(--tenant-texto);
 }
 
 .cat-add svg {
@@ -812,13 +842,13 @@ const processPay = () => { /* TODO: POST /pagos */ }
   gap: var(--espacio-3, 12px);
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: #1e1e1e transparent;
+  scrollbar-color: color-mix(in srgb, var(--tenant-texto) 10%, transparent) transparent;
   min-height: 0;
 }
 
 .product-card {
-  background: #111;
-  border: 1px solid #1c1c1c;
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   border-radius: 14px;
   display: flex;
   flex-direction: column;
@@ -833,8 +863,8 @@ const processPay = () => { /* TODO: POST /pagos */ }
 
 .product-card:hover {
   transform: translateY(-2px);
-  border-color: var(--tenant-primario, #3f99ff);
-  background: rgba(63, 153, 255, 0.04);
+  border-color: var(--tenant-primario);
+  background: color-mix(in srgb, var(--tenant-primario) 8%, transparent);
 }
 
 .product-card:active {
@@ -846,17 +876,25 @@ const processPay = () => { /* TODO: POST /pagos */ }
   line-height: 1;
 }
 
+.product-img {
+  width: 50px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
 .product-name {
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-medium, 500);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
   text-align: center;
   line-height: 1.2;
 }
 
 .product-price {
   font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 
 .product-empty {
@@ -864,7 +902,7 @@ const processPay = () => { /* TODO: POST /pagos */ }
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--tenant-texto-muted, #78716c);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   font-size: var(--font-size-sm, 13px);
 }
 

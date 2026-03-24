@@ -59,27 +59,38 @@ const puntos = computed(() => {
 
     <main class="main">
 
-      <!-- HEADER -->
       <header class="header">
         <h1>Estadísticas</h1>
 
         <div class="filters">
-          <button @click="filtro = 'dia'">Día</button>
-          <button @click="filtro = 'semana'">Semana</button>
-          <button @click="filtro = 'mes'">Mes</button>
+          <button 
+            :class="{ active: filtro === 'dia' }" 
+            @click="filtro = 'dia'"
+          >
+            Día
+          </button>
+          <button 
+            :class="{ active: filtro === 'semana' }" 
+            @click="filtro = 'semana'"
+          >
+            Semana
+          </button>
+          <button 
+            :class="{ active: filtro === 'mes' }" 
+            @click="filtro = 'mes'"
+          >
+            Mes
+          </button>
         </div>
       </header>
 
-      <!-- CARDS -->
       <div class="cards">
 
-        <!-- TOTAL -->
         <div class="card">
           <span>Total ventas</span>
           <h2>${{ totalVentas }}</h2>
         </div>
 
-        <!-- GRÁFICA -->
         <div class="card chart">
           <span>Ventas</span>
 
@@ -87,7 +98,7 @@ const puntos = computed(() => {
             <polyline
               :points="puntos"
               fill="none"
-              stroke="#3f99ff"
+              class="chart-line"
               stroke-width="3"
             />
           </svg>
@@ -95,7 +106,6 @@ const puntos = computed(() => {
 
       </div>
 
-      <!-- HISTORIAL -->
       <div class="card table">
         <h3>Historial</h3>
 
@@ -124,68 +134,144 @@ const puntos = computed(() => {
 </template>
 
 <style scoped>
+/* ── LAYOUT ── */
 .layout {
   display: flex;
   min-height: 100vh;
-  background: #000;
+  background-color: var(--tenant-fondo);
+  color: var(--tenant-texto);
+  font-family: var(--tenant-fuente, sans-serif);
 }
 
 .main {
   flex: 1;
-  padding: 20px;
+  padding: var(--espacio-5, 20px);
+  overflow-y: auto;
 }
 
-/* HEADER */
+/* ── HEADER ── */
 .header {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 20px;
+  align-items: center;
+  margin-bottom: var(--espacio-5, 20px);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: var(--font-size-2xl, 30px);
+  font-weight: var(--font-weight-bold, 600);
+}
+
+.filters {
+  display: flex;
+  gap: var(--espacio-2, 8px);
 }
 
 .filters button {
-  margin-left: 10px;
-  padding: 8px 12px;
-  background: #3f99ff;
-  border: none;
-  color: white;
+  padding: var(--espacio-2, 8px) var(--espacio-4, 16px);
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   border-radius: 6px;
   cursor: pointer;
+  font-family: var(--tenant-fuente, sans-serif);
+  font-weight: var(--font-weight-medium, 500);
+  font-size: var(--font-size-sm, 13px);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-/* CARDS */
+.filters button:hover {
+  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
+  color: var(--tenant-texto);
+}
+
+.filters button.active {
+  background: var(--tenant-primario);
+  border-color: var(--tenant-primario);
+  color: #fff;
+}
+
+/* ── CARDS ── */
 .cards {
   display: grid;
   grid-template-columns: 1fr 2fr;
-  gap: 15px;
-  margin-bottom: 20px;
+  gap: var(--espacio-4, 15px);
+  margin-bottom: var(--espacio-5, 20px);
 }
 
 .card {
-  background: #111;
-  padding: 15px;
-  border-radius: 10px;
-  color: white;
+  background: color-mix(in srgb, var(--tenant-fondo) 95%, black 5%);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
+  padding: var(--espacio-5, 20px);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
 }
 
+.card span {
+  font-size: var(--font-size-sm, 13px);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: var(--font-weight-medium, 500);
+}
+
+.card h2 {
+  margin: 10px 0 0 0;
+  font-size: 2.5rem;
+  color: var(--tenant-texto);
+  font-weight: var(--font-weight-bold, 600);
+}
+
+/* Gráfica */
 .chart svg {
   width: 100%;
   height: 120px;
-}
-
-/* TABLE */
-.table table {
-  width: 100%;
-  border-collapse: collapse;
   margin-top: 10px;
 }
 
+.chart-line {
+  stroke: var(--tenant-primario);
+  transition: all 0.3s ease;
+}
+
+/* ── TABLA ── */
+.table h3 {
+  margin: 0 0 15px 0;
+  font-size: var(--font-size-lg, 18px);
+  color: var(--tenant-texto);
+}
+
+.table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
 .table th, .table td {
-  padding: 10px;
-  border-bottom: 1px solid #222;
+  padding: 12px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
+  text-align: left;
 }
 
 .table th {
-  text-align: left;
-  color: #aaa;
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
+  font-size: var(--font-size-sm, 13px);
+  font-weight: var(--font-weight-medium, 500);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.table td {
+  font-size: var(--font-size-base, 15px);
+  color: var(--tenant-texto);
+}
+
+.table tbody tr {
+  transition: background 0.15s;
+}
+
+.table tbody tr:hover {
+  background: color-mix(in srgb, var(--tenant-texto) 2%, transparent);
 }
 </style>

@@ -64,9 +64,9 @@ const irAMenu = () => router.push({ name: 'menu' })
         <div class="card card--product">
           <div class="card-label">Producto más vendido</div>
           <div class="product-highlight">
-            <div class="product-emoji">☕</div>
+            <div class="product-emoji">⭐</div>
             <div class="product-info">
-              <span class="product-name">Café Americano</span>
+              <span class="product-name">Próximamente</span>
               <span class="product-badge">Top ventas</span>
             </div>
           </div>
