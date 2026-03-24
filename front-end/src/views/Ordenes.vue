@@ -75,12 +75,13 @@ const filteredOrders = computed(() =>
 )
 
 // ── COLORES POR STATUS ──────────────────────────────────
+// Se cambiaron los colores estáticos por variables temáticas
 const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
-  pendiente:   { label: 'Pendiente',   color: 'var(--color-orden-pendiente, #f59e0b)' },
-  preparacion: { label: 'Preparación', color: 'var(--color-orden-preparacion, #3b82f6)' },
-  lista:       { label: 'Lista',       color: 'var(--color-orden-lista, #22c55e)' },
-  entregada:   { label: 'Entregada',   color: 'var(--color-orden-entregada, #6b7280)' },
-  cancelada:   { label: 'Cancelada',   color: 'var(--color-orden-cancelada, #ef4444)' },
+  pendiente:   { label: 'Pendiente',   color: 'var(--color-advertencia, #f59e0b)' },
+  preparacion: { label: 'Preparación', color: 'var(--tenant-primario, #3b82f6)' },
+  lista:       { label: 'Lista',       color: 'var(--color-exitoso, #22c55e)' },
+  entregada:   { label: 'Entregada',   color: 'var(--tenant-texto-muted, #6b7280)' },
+  cancelada:   { label: 'Cancelada',   color: 'var(--color-error, #ef4444)' },
 }
 
 // ── ACCIONES ────────────────────────────────────────────
@@ -94,7 +95,6 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 
     <main class="ordenes-main">
 
-      <!-- Header -->
       <header class="ordenes-header">
         <div class="filter-bar">
           <button
@@ -110,7 +110,6 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
         <h1 class="page-title">Órdenes</h1>
       </header>
 
-      <!-- Grid -->
       <div class="orders-grid">
         <div
           v-for="order in filteredOrders"
@@ -118,13 +117,11 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
           class="order-card"
           :style="{ '--status-color': statusMeta[order.status].color }"
         >
-          <!-- Cabecera -->
           <div class="order-header">
             <span class="order-number">Orden: {{ order.orderNumber }}</span>
             <span class="order-time">{{ order.createdAt }}</span>
           </div>
 
-          <!-- Badge de estado -->
           <div class="status-badge">
             <span
               class="status-dot"
@@ -138,7 +135,6 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
             </span>
           </div>
 
-          <!-- Items -->
           <div class="order-items">
             <div v-for="(item, i) in order.items" :key="i" class="order-item">
               <div class="order-item-header">
@@ -156,7 +152,6 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
             </div>
           </div>
 
-          <!-- Footer: total + acciones -->
           <div class="order-footer">
             <span class="order-total">${{ order.total }}</span>
             <div class="order-actions">
@@ -177,7 +172,6 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
           </div>
         </div>
 
-        <!-- Estado vacío -->
         <div v-if="filteredOrders.length === 0" class="orders-empty">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -186,7 +180,6 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
         </div>
       </div>
 
-      <!-- Watermark -->
       <div class="watermark">
         <span class="watermark-label">Software por</span>
         <strong class="watermark-brand">CoffeeCode</strong>
@@ -200,7 +193,7 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 .ordenes-layout {
   display: flex;
   min-height: 100vh;
-  background-color: var(--tenant-fondo, #000);
+  background-color: var(--tenant-fondo);
 }
 
 .ordenes-main {
@@ -228,8 +221,8 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 }
 
 .filter-chip {
-  background: #0e0e0e;
-  border: 1px solid #1c1c1c;
+  background: color-mix(in srgb, var(--tenant-fondo) 95%, black 5%);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   color: var(--tenant-texto-muted, #78716c);
   border-radius: 50px;
   padding: var(--espacio-1, 4px) var(--espacio-4, 16px);
@@ -242,13 +235,13 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 }
 
 .filter-chip:hover {
-  border-color: #2a2a2a;
-  color: var(--tenant-texto, #fff);
+  border-color: color-mix(in srgb, var(--tenant-texto) 20%, transparent);
+  color: var(--tenant-texto);
 }
 
 .filter-chip.active {
-  background: var(--tenant-primario, #3f99ff);
-  border-color: var(--tenant-primario, #3f99ff);
+  background: var(--tenant-primario);
+  border-color: var(--tenant-primario);
   color: #fff;
 }
 
@@ -256,7 +249,7 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
   margin: 0;
   font-size: var(--font-size-2xl, 30px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
   white-space: nowrap;
 }
 
@@ -269,15 +262,15 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
   gap: var(--espacio-4, 16px);
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: #1e1e1e transparent;
+  scrollbar-color: color-mix(in srgb, var(--tenant-texto) 10%, transparent) transparent;
   align-content: start;
   min-height: 0;
 }
 
 /* ── TARJETA ── */
 .order-card {
-  background: #0e0e0e;
-  border: 1.5px solid #1c1c1c;
+  background: color-mix(in srgb, var(--tenant-fondo) 95%, black 5%);
+  border: 1.5px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   border-radius: 16px;
   padding: var(--espacio-4, 16px);
   display: flex;
@@ -288,7 +281,7 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 }
 
 .order-card:hover {
-  border-color: #2a2a2a;
+  border-color: color-mix(in srgb, var(--tenant-texto) 20%, transparent);
 }
 
 /* Línea de color izquierda según status */
@@ -309,21 +302,21 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #1a1a1a;
+  border-bottom: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
   padding-bottom: var(--espacio-2, 8px);
 }
 
 .order-number {
   font-size: var(--font-size-md, 17px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
 }
 
 .order-time {
   font-size: var(--font-size-xs, 11px);
   color: var(--tenant-texto-muted, #78716c);
-  background: #181818;
-  border: 1px solid #222;
+  background: color-mix(in srgb, var(--tenant-texto) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 15%, transparent);
   border-radius: 20px;
   padding: 2px 8px;
 }
@@ -376,13 +369,13 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 .order-item-name {
   font-size: var(--font-size-base, 15px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
 }
 
 .order-item-qty {
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-medium, 500);
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario);
 }
 
 .order-customizations {
@@ -394,8 +387,8 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 .custom-tag {
   font-size: var(--font-size-xs, 11px);
   color: var(--color-advertencia, #d9a106);
-  background: rgba(217, 161, 6, 0.08);
-  border: 1px solid rgba(217, 161, 6, 0.15);
+  background: color-mix(in srgb, var(--color-advertencia, #d9a106) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-advertencia, #d9a106) 15%, transparent);
   border-radius: 4px;
   padding: 1px 6px;
 }
@@ -416,7 +409,7 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 }
 
 .extra-qty {
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario);
 }
 
 /* Footer */
@@ -424,14 +417,14 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid #1a1a1a;
+  border-top: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
   padding-top: var(--espacio-2, 8px);
 }
 
 .order-total {
   font-size: var(--font-size-base, 15px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-texto, #fff);
+  color: var(--tenant-texto);
 }
 
 .order-actions {
@@ -443,8 +436,8 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  border: 1px solid #1e1e1e;
-  background: #111;
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -463,9 +456,9 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 }
 
 .card-btn--edit:hover {
-  background: rgba(63, 153, 255, 0.1);
-  border-color: rgba(63, 153, 255, 0.25);
-  color: var(--tenant-primario, #3f99ff);
+  background: color-mix(in srgb, var(--tenant-primario) 10%, transparent);
+  border-color: color-mix(in srgb, var(--tenant-primario) 25%, transparent);
+  color: var(--tenant-primario);
 }
 
 .card-btn--delete {
@@ -473,8 +466,8 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 }
 
 .card-btn--delete:hover {
-  background: rgba(220, 38, 38, 0.1);
-  border-color: rgba(220, 38, 38, 0.25);
+  background: color-mix(in srgb, var(--color-error, #dc2626) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-error, #dc2626) 25%, transparent);
   color: var(--color-error, #dc2626);
 }
 
@@ -487,7 +480,7 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
   justify-content: center;
   gap: var(--espacio-4, 16px);
   padding: var(--espacio-12, 48px) 0;
-  color: #2a2a2a;
+  color: color-mix(in srgb, var(--tenant-texto) 20%, transparent);
 }
 
 .orders-empty svg {
@@ -522,7 +515,7 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
 .watermark-brand {
   font-size: var(--font-size-md, 17px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-primario, #3f99ff);
+  color: var(--tenant-primario);
   letter-spacing: -0.02em;
 }
 </style>

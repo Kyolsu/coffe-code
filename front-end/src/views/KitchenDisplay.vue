@@ -68,7 +68,11 @@ const handleKeydown = (e: KeyboardEvent) => {
 onMounted(() => window.addEventListener('keydown', handleKeydown))
 onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
 
-// ── LOGOUT ──────────────────────────────────────────────
+// ── NAVEGACIÓN Y LOGOUT ─────────────────────────────────
+const goBack = () => {
+  router.push({ name: 'dashboard' })
+}
+
 const handleLogout = () => {
   localStorage.removeItem('coffe_token')
   router.push({ name: 'login' })
@@ -78,23 +82,27 @@ const handleLogout = () => {
 <template>
   <div class="kd-layout">
 
-    <!-- Sidebar solo para no-cocineros -->
     <Sidebar v-if="!isCocinero" />
 
-    <!-- Si es cocinero, botón de logout flotante -->
-    <button v-if="isCocinero" class="cocinero-logout" @click="handleLogout" title="Cerrar sesión">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Salir
-    </button>
+    <div v-if="isCocinero" class="floating-actions">
+      <button class="btn-float btn-regresar" @click="goBack" title="Regresar al Dashboard">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Regresar
+      </button>
+      <button class="btn-float btn-salir" @click="handleLogout" title="Cerrar sesión">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Salir
+      </button>
+    </div>
 
-    <!-- Contenido principal del KD -->
     <main class="kd-main">
 
       <header class="kd-header">
-        <div class="kd-header-left">
+        <div class="kd-header-center">
           <h1 class="kd-title">KD</h1>
           <span class="kd-subtitle">Kitchen Display</span>
         </div>
+
         <div class="kd-header-right">
           <div class="kd-count">
             <span class="kd-count-number">{{ orders.length }}</span>
@@ -108,7 +116,6 @@ const handleLogout = () => {
         </div>
       </header>
 
-      <!-- Grid de órdenes -->
       <div class="kd-grid">
         <div
           v-for="order in orders"
@@ -120,13 +127,11 @@ const handleLogout = () => {
           :tabindex="0"
           @keydown.enter.stop="markReady(order.id)"
         >
-          <!-- Cabecera de la orden -->
           <div class="order-header">
             <span class="order-number">Orden: {{ order.orderNumber }}</span>
             <span class="order-time">{{ order.createdAt }}</span>
           </div>
 
-          <!-- Items -->
           <div class="order-items">
             <div v-for="(item, i) in order.items" :key="i" class="order-item">
               <div class="order-item-header">
@@ -144,7 +149,6 @@ const handleLogout = () => {
             </div>
           </div>
 
-          <!-- Acción rápida al seleccionar -->
           <Transition name="fade">
             <button
               v-if="selectedId === order.id"
@@ -157,14 +161,12 @@ const handleLogout = () => {
           </Transition>
         </div>
 
-        <!-- Estado vacío -->
         <div v-if="orders.length === 0" class="kd-empty">
           <svg viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <p>Sin órdenes pendientes</p>
         </div>
       </div>
 
-      <!-- Watermark -->
       <div class="watermark">
         <span class="watermark-label">Software por</span>
         <strong class="watermark-brand">CoffeeCode</strong>
@@ -178,7 +180,7 @@ const handleLogout = () => {
 .kd-layout {
   display: flex;
   min-height: 100vh;
-  background-color: var(--color-oscuro-fondo, #141110);
+  background-color: var(--tenant-fondo);
   position: relative;
 }
 
@@ -193,18 +195,20 @@ const handleLogout = () => {
   position: relative;
 }
 
-/* ── LOGOUT COCINERO ── */
-.cocinero-logout {
+/* ── ACCIONES FLOTANTES (Cocinero) ── */
+.floating-actions {
   position: fixed;
   top: var(--espacio-4, 16px);
   left: var(--espacio-4, 16px);
   z-index: 100;
   display: flex;
+  gap: var(--espacio-2, 8px);
+}
+
+.btn-float {
+  display: flex;
   align-items: center;
   gap: var(--espacio-2, 8px);
-  background: var(--color-oscuro-input, #1f1916);
-  border: 1px solid var(--color-oscuro-borde, #2e2420);
-  color: var(--color-cancelar, #fd8d8d);
   border-radius: 10px;
   padding: var(--espacio-2, 8px) var(--espacio-3, 12px);
   font-size: var(--font-size-sm, 13px);
@@ -214,44 +218,72 @@ const handleLogout = () => {
   transition: background 0.15s, border-color 0.15s;
 }
 
-.cocinero-logout:hover {
-  background: rgba(253, 141, 141, 0.08);
-  border-color: rgba(253, 141, 141, 0.25);
-}
-
-.cocinero-logout svg {
+.btn-float svg {
   width: 16px;
   height: 16px;
 }
+
+/* Regresar */
+.btn-regresar {
+  background: color-mix(in srgb, var(--tenant-texto) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 15%, transparent);
+  color: var(--tenant-texto);
+}
+
+.btn-regresar:hover {
+  background: color-mix(in srgb, var(--tenant-texto) 12%, transparent);
+  border-color: color-mix(in srgb, var(--tenant-texto) 30%, transparent);
+}
+
+/* Salir */
+.btn-salir {
+  background: color-mix(in srgb, var(--color-cancelar, #fd8d8d) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-cancelar, #fd8d8d) 20%, transparent);
+  color: var(--color-cancelar, #fd8d8d);
+}
+
+.btn-salir:hover {
+  background: color-mix(in srgb, var(--color-cancelar, #fd8d8d) 15%, transparent);
+  border-color: color-mix(in srgb, var(--color-cancelar, #fd8d8d) 35%, transparent);
+}
+
 
 /* ── HEADER ── */
 .kd-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end; /* Empuja el panel derecho a la esquina */
+  position: relative;
+  min-height: 48px;
 }
 
-.kd-header-left {
+/* Título Centrado Absoluto */
+.kd-header-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: baseline;
   gap: var(--espacio-3, 12px);
+  white-space: nowrap;
 }
 
 .kd-title {
   margin: 0;
   font-size: var(--font-size-3xl, 38px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--color-oscuro-texto, #f0ebe5);
+  color: var(--tenant-texto);
   line-height: 1;
 }
 
 .kd-subtitle {
   font-size: var(--font-size-sm, 13px);
-  color: var(--color-oscuro-texto-muted, #9a8070);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
+/* Panel Derecho */
 .kd-header-right {
   display: flex;
   align-items: center;
@@ -262,8 +294,8 @@ const handleLogout = () => {
   display: flex;
   align-items: baseline;
   gap: var(--espacio-2, 8px);
-  background: var(--color-oscuro-input, #1f1916);
-  border: 1px solid var(--color-oscuro-borde, #2e2420);
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   border-radius: 10px;
   padding: var(--espacio-2, 8px) var(--espacio-4, 16px);
 }
@@ -271,13 +303,13 @@ const handleLogout = () => {
 .kd-count-number {
   font-size: var(--font-size-xl, 24px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--color-orden-pendiente, #f59e0b);
+  color: var(--color-advertencia, #f59e0b);
   line-height: 1;
 }
 
 .kd-count-label {
   font-size: var(--font-size-xs, 11px);
-  color: var(--color-oscuro-texto-muted, #9a8070);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -287,17 +319,17 @@ const handleLogout = () => {
   align-items: center;
   gap: var(--espacio-2, 8px);
   font-size: var(--font-size-xs, 11px);
-  color: var(--color-oscuro-texto-muted, #9a8070);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 
 kbd {
-  background: var(--color-oscuro-input, #1f1916);
-  border: 1px solid var(--color-oscuro-borde, #2e2420);
+  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 20%, transparent);
   border-radius: 4px;
   padding: 1px 6px;
   font-size: var(--font-size-xs, 11px);
   font-family: var(--tenant-fuente, monospace);
-  color: var(--color-oscuro-texto, #f0ebe5);
+  color: var(--tenant-texto);
 }
 
 /* ── GRID DE ÓRDENES ── */
@@ -309,15 +341,15 @@ kbd {
   gap: var(--espacio-4, 16px);
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--color-oscuro-borde, #2e2420) transparent;
+  scrollbar-color: color-mix(in srgb, var(--tenant-texto) 10%, transparent) transparent;
   align-content: start;
   min-height: 0;
 }
 
 /* ── TARJETA DE ORDEN ── */
 .order-card {
-  background: var(--color-oscuro-input, #1f1916);
-  border: 1.5px solid var(--color-oscuro-borde, #2e2420);
+  background: color-mix(in srgb, var(--tenant-fondo) 95%, black 5%);
+  border: 1.5px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   border-radius: 16px;
   padding: var(--espacio-4, 16px);
   display: flex;
@@ -330,14 +362,14 @@ kbd {
 }
 
 .order-card:hover {
-  border-color: rgba(194, 96, 10, 0.4);
+  border-color: color-mix(in srgb, var(--tenant-primario) 40%, transparent);
   transform: translateY(-1px);
 }
 
 .order-card.selected {
-  border-color: var(--color-orden-lista, #22c55e);
-  box-shadow: 0 0 0 1px var(--color-orden-lista, #22c55e),
-              0 8px 24px rgba(34, 197, 94, 0.12);
+  border-color: var(--color-exitoso, #22c55e);
+  box-shadow: 0 0 0 1px var(--color-exitoso, #22c55e),
+              0 8px 24px color-mix(in srgb, var(--color-exitoso, #22c55e) 12%, transparent);
 }
 
 /* Cabecera de la orden */
@@ -345,21 +377,21 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--color-oscuro-borde, #2e2420);
+  border-bottom: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
   padding-bottom: var(--espacio-2, 8px);
 }
 
 .order-number {
   font-size: var(--font-size-md, 17px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--color-oscuro-texto, #f0ebe5);
+  color: var(--tenant-texto);
 }
 
 .order-time {
   font-size: var(--font-size-xs, 11px);
-  color: var(--color-oscuro-texto-muted, #9a8070);
-  background: var(--color-oscuro-fondo, #141110);
-  border: 1px solid var(--color-oscuro-borde, #2e2420);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 15%, transparent);
   border-radius: 20px;
   padding: 2px 8px;
 }
@@ -394,13 +426,13 @@ kbd {
 .order-item-name {
   font-size: var(--font-size-base, 15px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--color-oscuro-texto, #f0ebe5);
+  color: var(--tenant-texto);
 }
 
 .order-item-qty {
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-medium, 500);
-  color: var(--tenant-primario, #c2600a);
+  color: var(--tenant-primario);
   white-space: nowrap;
 }
 
@@ -414,8 +446,8 @@ kbd {
 .custom-tag {
   font-size: var(--font-size-xs, 11px);
   color: var(--color-advertencia, #d97706);
-  background: rgba(217, 119, 6, 0.12);
-  border: 1px solid rgba(217, 119, 6, 0.2);
+  background: color-mix(in srgb, var(--color-advertencia, #d97706) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-advertencia, #d97706) 20%, transparent);
   border-radius: 4px;
   padding: 1px 6px;
 }
@@ -426,7 +458,7 @@ kbd {
   align-items: center;
   gap: var(--espacio-1, 4px);
   font-size: var(--font-size-xs, 11px);
-  color: var(--color-oscuro-texto-muted, #9a8070);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   padding-left: var(--espacio-2, 8px);
 }
 
@@ -437,17 +469,17 @@ kbd {
 }
 
 .extra-qty {
-  color: var(--tenant-primario, #c2600a);
+  color: var(--tenant-primario);
 }
 
 /* Botón "Lista" al seleccionar */
 .order-ready-btn {
   width: 100%;
   padding: var(--espacio-2, 8px);
-  background: rgba(34, 197, 94, 0.1);
-  border: 1px solid rgba(34, 197, 94, 0.25);
+  background: color-mix(in srgb, var(--color-exitoso, #22c55e) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-exitoso, #22c55e) 25%, transparent);
   border-radius: 10px;
-  color: var(--color-orden-lista, #22c55e);
+  color: var(--color-exitoso, #22c55e);
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-bold, 600);
   cursor: pointer;
@@ -460,7 +492,7 @@ kbd {
 }
 
 .order-ready-btn:hover {
-  background: rgba(34, 197, 94, 0.18);
+  background: color-mix(in srgb, var(--color-exitoso, #22c55e) 18%, transparent);
 }
 
 .order-ready-btn svg {
@@ -477,7 +509,7 @@ kbd {
   justify-content: center;
   gap: var(--espacio-4, 16px);
   padding: var(--espacio-12, 48px) 0;
-  color: var(--color-oscuro-borde, #2e2420);
+  color: color-mix(in srgb, var(--tenant-texto) 20%, transparent);
 }
 
 .kd-empty svg {
@@ -488,7 +520,7 @@ kbd {
 .kd-empty p {
   margin: 0;
   font-size: var(--font-size-base, 15px);
-  color: var(--color-oscuro-texto-muted, #9a8070);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 
 /* ── WATERMARK ── */
@@ -505,7 +537,7 @@ kbd {
 
 .watermark-label {
   font-size: var(--font-size-xs, 11px);
-  color: var(--color-oscuro-texto-muted, #9a8070);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -513,7 +545,7 @@ kbd {
 .watermark-brand {
   font-size: var(--font-size-md, 17px);
   font-weight: var(--font-weight-bold, 600);
-  color: var(--tenant-primario, #c2600a);
+  color: var(--tenant-primario);
   letter-spacing: -0.02em;
 }
 
