@@ -481,6 +481,133 @@ const retirarProductoDelMenu = async (mp: MenuProducto) => {
   } catch { mostrarToast('error', 'Error al retirar producto') }
 }
 
+// ══════════════════════════════════════════════════════
+//  PAQUETES
+// ══════════════════════════════════════════════════════
+interface Paquete {
+  id_paquete:       number
+  nombre_paquete:   string
+  descripcion:      string | null
+  precio_paquete:   number
+  es_temporal:      boolean
+  fecha_inicio:     string | null
+  fecha_fin:        string | null
+  dias_disponibles: string | null
+  url_imagen:       string | null
+  activo:           boolean
+}
+
+const paquetes      = ref<Paquete[]>([])
+const cargandoPaq   = ref(false)
+const busquedaPaq   = ref('')
+const tabPaq        = ref<'completa' | 'comprimida'>('completa')
+
+const paquetesFiltrados = computed(() => {
+  const q = busquedaPaq.value.toLowerCase()
+  return q
+    ? paquetes.value.filter(p => p.nombre_paquete.toLowerCase().includes(q))
+    : paquetes.value
+})
+
+// GET /api/paquetes/vista-completa  y  /vista-comprimida
+const fetchPaquetes = async () => {
+  cargandoPaq.value = true
+  try {
+    const url  = `${API_URL}/api/paquetes/vista-completa`
+    const res  = await fetch(url)
+    const data = await res.json()
+    paquetes.value = data.status === 'ok' ? data.datos : []
+  } catch { paquetes.value = [] }
+  finally   { cargandoPaq.value = false }
+}
+
+// ── MODAL PAQUETE ──────────────────────────────────────
+const modalPaq      = ref(false)
+const editandoPaq   = ref(false)
+const guardandoPaq  = ref(false)
+const errorPaq      = ref('')
+
+const formPaq = ref({
+  id_paquete:       0,
+  nombre:           '',
+  descripcion:      '',
+  precio:           0,
+  es_temporal:      false,
+  fecha_inicio:     '',
+  fecha_fin:        '',
+  dias_disponibles: '',
+  url_imagen:       '',
+  activo:           true,
+})
+
+const abrirCrearPaq = () => {
+  formPaq.value = { id_paquete: 0, nombre: '', descripcion: '', precio: 0, es_temporal: false, fecha_inicio: '', fecha_fin: '', dias_disponibles: '', url_imagen: '', activo: true }
+  editandoPaq.value = false; errorPaq.value = ''; modalPaq.value = true
+}
+
+const abrirEditarPaq = (p: Paquete) => {
+  const actRaw = p.activo as unknown
+  formPaq.value = {
+    id_paquete:       p.id_paquete,
+    nombre:           p.nombre_paquete,
+    descripcion:      p.descripcion ?? '',
+    precio:           p.precio_paquete,
+    es_temporal:      (p.es_temporal as unknown) !== false && (p.es_temporal as unknown) !== 'false',
+    fecha_inicio:     p.fecha_inicio ?? '',
+    fecha_fin:        p.fecha_fin    ?? '',
+    dias_disponibles: p.dias_disponibles ?? '',
+    url_imagen:       p.url_imagen ?? '',
+    activo:           actRaw !== false && actRaw !== 'false',
+  }
+  editandoPaq.value = true; errorPaq.value = ''; modalPaq.value = true
+}
+
+const cerrarModalPaq = () => { modalPaq.value = false; errorPaq.value = '' }
+
+const guardarPaquete = async () => {
+  guardandoPaq.value = true; errorPaq.value = ''
+  try {
+    const url    = editandoPaq.value
+      ? `${API_URL}/api/paquetes/actualizar/${formPaq.value.id_paquete}`
+      : `${API_URL}/api/paquetes/agregar`
+    const method = editandoPaq.value ? 'PUT' : 'POST'
+    const body: Record<string, unknown> = {
+      nombre:           formPaq.value.nombre,
+      descripcion:      formPaq.value.descripcion      || undefined,
+      precio:           formPaq.value.precio,
+      es_temporal:      formPaq.value.es_temporal,
+      fecha_inicio:     formPaq.value.fecha_inicio     || undefined,
+      fecha_fin:        formPaq.value.fecha_fin        || undefined,
+      dias_disponibles: formPaq.value.dias_disponibles || undefined,
+      url_imagen:       formPaq.value.url_imagen       || undefined,
+    }
+    if (editandoPaq.value) body.activo = formPaq.value.activo
+
+    const res  = await fetch(url, { method, headers: authStore.authHeaders(), body: JSON.stringify(body) })
+    const data = await res.json()
+    if (data.status === 'ok') {
+      await fetchPaquetes()
+      mostrarToast('ok', editandoPaq.value ? 'Paquete actualizado' : 'Paquete creado')
+      cerrarModalPaq()
+    } else { errorPaq.value = data.mensaje }
+  } catch { errorPaq.value = 'Error al conectar con el servidor' }
+  finally   { guardandoPaq.value = false }
+}
+
+// DELETE /api/paquetes/desactivar/:id
+const desactivarPaquete = async (p: Paquete) => {
+  try {
+    const res  = await fetch(`${API_URL}/api/paquetes/desactivar/${p.id_paquete}`, {
+      method: 'DELETE', headers: authStore.authHeaders(),
+    })
+    const data = await res.json()
+    if (data.status === 'ok') {
+      await fetchPaquetes()
+      mostrarToast('ok', `"${p.nombre_paquete}" desactivado`)
+    } else { mostrarToast('error', data.mensaje) }
+  } catch { mostrarToast('error', 'Error al desactivar paquete') }
+}
+
 // ── INIT ───────────────────────────────────────────────
 onMounted(async () => {
   await fetchCatalogos()
@@ -512,7 +639,7 @@ onMounted(async () => {
           <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           Menús
         </button>
-        <button class="sec-tab" :class="{ active: seccion === 'paquetes' }" @click="seccion = 'paquetes'">
+        <button class="sec-tab" :class="{ active: seccion === 'paquetes' }" @click="seccion = 'paquetes'; fetchPaquetes()">
           <svg viewBox="0 0 24 24" fill="none"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           Paquetes & Promociones
         </button>
@@ -737,12 +864,71 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- ════════════════ PAQUETES (en construcción) ════════════════ -->
+      <!-- ════════════════ PAQUETES ════════════════ -->
       <div v-if="seccion === 'paquetes'" class="section">
-        <div class="construction-card">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <h2>Paquetes & Promociones</h2>
-          <p>Esta sección está en construcción.</p>
+
+        <div class="toolbar">
+          <div class="search-bar">
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="1.5"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <input v-model="busquedaPaq" placeholder="Buscar paquete..." />
+          </div>
+          <button class="btn-add" @click="abrirCrearPaq">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            Nuevo paquete
+          </button>
+        </div>
+
+        <!-- Aviso: composición de productos pendiente -->
+        <div class="info-banner">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <p>La asignación de productos a grupos dentro de los paquetes aún no está disponible en la API. Por ahora puedes gestionar los paquetes como entidad.</p>
+        </div>
+
+        <div v-if="cargandoPaq" class="state-msg">Cargando paquetes...</div>
+
+        <div class="paq-grid">
+          <div
+            v-for="p in paquetesFiltrados" :key="p.id_paquete"
+            class="paq-card"
+            :class="{ 'paq-card--inactivo': !(p.activo) }"
+          >
+            <!-- Badge temporal -->
+            <div class="paq-badges">
+              <span v-if="p.es_temporal" class="paq-badge paq-badge--temporal">Temporal</span>
+              <span v-if="!(p.activo)" class="paq-badge paq-badge--inactivo">Inactivo</span>
+            </div>
+
+            <div class="paq-icon">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </div>
+
+            <div class="paq-body">
+              <strong class="paq-nombre">{{ p.nombre_paquete }}</strong>
+              <span class="paq-desc">{{ p.descripcion || '—' }}</span>
+              <div class="paq-meta">
+                <span class="paq-precio">${{ p.precio_paquete }}</span>
+                <span v-if="p.dias_disponibles" class="paq-dia">{{ p.dias_disponibles }}</span>
+              </div>
+              <div v-if="p.fecha_inicio || p.fecha_fin" class="paq-fechas">
+                <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                {{ p.fecha_inicio ?? '—' }} → {{ p.fecha_fin ?? '—' }}
+              </div>
+            </div>
+
+            <div class="paq-actions">
+              <button class="icon-btn icon-btn--edit"   @click="abrirEditarPaq(p)" title="Editar paquete">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="icon-btn icon-btn--delete" @click="desactivarPaquete(p)" title="Desactivar paquete">
+                <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div v-if="!cargandoPaq && paquetesFiltrados.length === 0" class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            <p>Sin paquetes registrados</p>
+          </div>
         </div>
       </div>
 
@@ -912,6 +1098,50 @@ onMounted(async () => {
             <button class="btn-ghost" @click="modalMenuProd = false">Cancelar</button>
             <button class="btn-primary" :disabled="guardandoMenuProd || !selProductoMenu" @click="agregarProductoAlMenu">
               <span v-if="!guardandoMenuProd">Agregar</span><span v-else class="spinner"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- ══ MODAL PAQUETE ══ -->
+    <Transition name="modal">
+      <div v-if="modalPaq" class="modal-overlay" @click.self="cerrarModalPaq">
+        <div class="modal modal--wide">
+          <div class="modal-header">
+            <h2>{{ editandoPaq ? 'Editar paquete' : 'Nuevo paquete' }}</h2>
+            <button class="modal-close" @click="cerrarModalPaq"><svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+          </div>
+          <div class="modal-body modal-body--grid">
+            <div class="field field--full"><label>Nombre *</label><input v-model="formPaq.nombre" placeholder="Ej: Combo Desayuno" /></div>
+            <div class="field"><label>Precio * ($)</label><input v-model.number="formPaq.precio" type="number" min="0" step="0.5" /></div>
+            <div class="field"><label>Días disponibles</label><input v-model="formPaq.dias_disponibles" placeholder="Ej: Lunes-Viernes" /></div>
+            <div class="field"><label>Fecha inicio</label><input v-model="formPaq.fecha_inicio" type="date" /></div>
+            <div class="field"><label>Fecha fin</label><input v-model="formPaq.fecha_fin" type="date" /></div>
+            <div class="field field--full"><label>Descripción</label><input v-model="formPaq.descripcion" placeholder="Descripción breve (opcional)" /></div>
+            <div class="field field--full"><label>URL de imagen</label><input v-model="formPaq.url_imagen" placeholder="https://..." /></div>
+            <div class="field field--row">
+              <label>¿Es temporal?</label>
+              <label class="toggle">
+                <input type="checkbox" :checked="formPaq.es_temporal === true" @change="formPaq.es_temporal = ($event.target as HTMLInputElement).checked" />
+                <span class="toggle-slider"></span>
+                <span :class="formPaq.es_temporal ? 'toggle-text--on' : 'toggle-text--off'">{{ formPaq.es_temporal ? 'Sí' : 'No' }}</span>
+              </label>
+            </div>
+            <div v-if="editandoPaq" class="field field--row">
+              <label>Estado</label>
+              <label class="toggle">
+                <input type="checkbox" :checked="formPaq.activo === true" @change="formPaq.activo = ($event.target as HTMLInputElement).checked" />
+                <span class="toggle-slider"></span>
+                <span :class="formPaq.activo ? 'toggle-text--on' : 'toggle-text--off'">{{ formPaq.activo ? 'Activo' : 'Inactivo' }}</span>
+              </label>
+            </div>
+            <div v-if="errorPaq" class="error-msg field--full">{{ errorPaq }}</div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-ghost" @click="cerrarModalPaq">Cancelar</button>
+            <button class="btn-primary" :disabled="guardandoPaq" @click="guardarPaquete">
+              <span v-if="!guardandoPaq">{{ editandoPaq ? 'Guardar' : 'Crear' }}</span><span v-else class="spinner"></span>
             </button>
           </div>
         </div>
@@ -1132,16 +1362,50 @@ onMounted(async () => {
 .empty-state svg { width: 40px; height: 40px; color: var(--color-borde); }
 .empty-state p   { margin: 0; font-size: var(--font-size-base); color: var(--tenant-texto-muted); }
 
-/* ── EN CONSTRUCCIÓN ── */
-.construction-card {
-  background: var(--color-superficie); border: 2px dashed var(--color-borde);
-  border-radius: 20px; padding: var(--espacio-12);
-  display: flex; flex-direction: column; align-items: center; gap: var(--espacio-4);
-  text-align: center; max-width: 500px; margin: var(--espacio-8) auto;
+
+/* ── PAQUETES GRID ── */
+.paq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--espacio-4);
+  align-content: start;
 }
-.construction-card svg { width: 48px; height: 48px; color: var(--tenant-texto-muted); }
-.construction-card h2  { margin: 0; font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--tenant-texto); }
-.construction-card p   { margin: 0; font-size: var(--font-size-sm); color: var(--tenant-texto-muted); line-height: 1.5; }
+
+.paq-card {
+  background: var(--color-superficie);
+  border: 1px solid var(--color-borde);
+  border-radius: 16px;
+  padding: var(--espacio-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--espacio-3);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.paq-card:hover { border-color: var(--tenant-primario); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.paq-card--inactivo { opacity: 0.6; border-style: dashed; }
+
+.paq-badges { display: flex; gap: var(--espacio-2); flex-wrap: wrap; }
+.paq-badge { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); border-radius: 20px; padding: 2px 10px; }
+.paq-badge--temporal { background: rgba(217,119,6,0.1); color: var(--color-advertencia); border: 1px solid rgba(217,119,6,0.2); }
+.paq-badge--inactivo { background: rgba(107,114,128,0.1); color: var(--tenant-texto-muted); border: 1px solid rgba(107,114,128,0.2); }
+
+.paq-icon { width: 44px; height: 44px; border-radius: 12px; background: rgba(194,96,10,0.08); color: var(--tenant-primario); display: flex; align-items: center; justify-content: center; }
+.paq-icon svg { width: 22px; height: 22px; }
+
+.paq-body { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.paq-nombre { font-size: var(--font-size-base); font-weight: var(--font-weight-bold); color: var(--tenant-texto); }
+.paq-desc   { font-size: var(--font-size-xs); color: var(--tenant-texto-muted); line-height: 1.4; }
+.paq-meta   { display: flex; align-items: center; gap: var(--espacio-2); flex-wrap: wrap; margin-top: 4px; }
+.paq-precio { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-exitoso); }
+.paq-dia    { font-size: var(--font-size-xs); color: var(--tenant-texto-muted); background: var(--tenant-fondo); border-radius: 20px; padding: 1px 8px; }
+.paq-fechas { display: flex; align-items: center; gap: var(--espacio-2); font-size: var(--font-size-xs); color: var(--tenant-texto-muted); margin-top: 4px; }
+.paq-fechas svg { width: 13px; height: 13px; flex-shrink: 0; }
+.paq-actions { display: flex; gap: var(--espacio-2); border-top: 1px solid var(--color-borde); padding-top: var(--espacio-3); }
+
+/* ── INFO BANNER ── */
+.info-banner { display: flex; gap: var(--espacio-3); align-items: flex-start; background: var(--color-superficie); border: 1px solid var(--color-borde); border-left: 3px solid var(--color-info); border-radius: 12px; padding: var(--espacio-3) var(--espacio-4); font-size: var(--font-size-sm); color: var(--tenant-texto-muted); line-height: 1.5; }
+.info-banner svg { width: 16px; height: 16px; color: var(--color-info); flex-shrink: 0; margin-top: 2px; }
+.info-banner p   { margin: 0; }
 
 /* ── MODAL ── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; z-index: 100; padding: var(--espacio-6); backdrop-filter: blur(2px); }
