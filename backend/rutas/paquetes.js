@@ -228,4 +228,295 @@ router.get('/vista-completa', async (req, res) => {
         });
     }
 });
+
+
+//////////////////////////////////
+//PAQUETES GRUPO 
+/////////////////////////////////
+
+
+//ALTA PAQUETE GRUPO
+
+router.post('/grupos/agregar', verificarToken, async (req, res) => {
+    try {
+        const { id_paquete, nombre_grupo, es_obligatorio, cantidad } = req.body;
+        if (!id_paquete || !nombre_grupo) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_paquete y nombre_grupo son campos obligatorios."
+            });
+        }
+        const query = `
+            SELECT fn_alta_paquete_grupo($1, $2, $3, $4) AS id_grupo
+        `;
+        const values = [
+            id_paquete,
+            nombre_grupo,
+            es_obligatorio !== undefined ? es_obligatorio : true,
+            cantidad || 1
+        ];
+
+        const result = await db.query(query, values);
+        
+        res.status(201).json({
+            status: "ok",
+            mensaje: "Grupo de selección creado exitosamente",
+            id_paquete_grupo: result.rows[0].id_grupo
+        });
+
+    } catch (err) {
+        console.error("Error al crear grupo de paquete:", err.message);
+        if (err.message.includes('El paquete no existe') || err.message.includes('mayor a 0')) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: err.message
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar el grupo del paquete"
+        });
+    }
+});
+
+router.delete('/grupos/desactivar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const query = 'SELECT fn_baja_paquete_grupo($1) AS resultado';
+        const result = await db.query(query, [id]);
+
+        const mensajeRecibido = result.rows[0].resultado;
+        if (mensajeRecibido === 'El grupo no existe') {
+            return res.status(404).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+        if (mensajeRecibido === 'El grupo ya está inactivo') {
+            return res.status(400).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: mensajeRecibido,
+            id_grupo_desactivado: id
+        });
+
+    } catch (err) {
+        console.error("Error al desactivar grupo de paquete:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la baja del grupo"
+        });
+    }
+});
+
+
+router.put('/grupos/modificar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { nombre, obligatorio, cantidad, activo } = req.body;
+
+        const query = `
+            SELECT fn_actualizar_paquete_grupo($1, $2, $3, $4, $5) AS resultado
+        `;
+        const values = [
+            id,
+            nombre || null,
+            obligatorio !== undefined ? obligatorio : null,
+            cantidad !== undefined ? cantidad : null,
+            activo !== undefined ? activo : null
+        ];
+
+        const result = await db.query(query, values);
+        const mensaje = result.rows[0].resultado;
+        if (mensaje === 'El grupo no existe') {
+            return res.status(404).json({ status: "error", mensaje });
+        }
+
+        if (mensaje === 'cantidad_selecciones inválida') {
+            return res.status(400).json({ status: "error", mensaje });
+        }
+        res.json({
+            status: "ok",
+            mensaje,
+            datos_nuevos: { id, ...req.body }
+        });
+
+    } catch (err) {
+        console.error("Error al actualizar grupo de paquete:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar actualizar el grupo"
+        });
+    }
+}); 
+
+//MOSTRAR PAQUETE GRUPO
+router.get('/grupo/mostrar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const query = 'SELECT * FROM fn_get_grupos_por_paquete($1)';
+        const result = await db.query(query, [id]);
+
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "Este paquete aún no tiene grupos de selección asignados.",
+                datos: []
+            });
+        }
+
+        res.json({
+            status: "ok",
+            total_grupos: result.rows.length,
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener grupos del paquete:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al consultar los grupos del paquete"
+        });
+    }
+});
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+//paquete grupo productos 
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+///ALTA
+router.post('/grupos-productos/vincular', verificarToken, async (req, res) => {
+    try {
+        const { id_grupo, id_producto, precio_adicional } = req.body;
+        if (!id_grupo || !id_producto) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_grupo e id_producto son obligatorios."
+            });
+        }
+        const query = 'SELECT fn_alta_paquete_grupo_producto($1, $2, $3) AS resultado';
+        const values = [id_grupo, id_producto, precio_adicional || 0];
+
+        const result = await db.query(query, values);
+        const mensaje = result.rows[0].resultado;
+        if (mensaje === 'Ya existe esta relación') {
+            return res.status(409).json({ // 409: Conflict
+                status: "error",
+                mensaje
+            });
+        }
+
+        res.status(201).json({
+            status: "ok",
+            mensaje,
+            datos: { id_grupo, id_producto, precio_adicional }
+        });
+
+    } catch (err) {
+        console.error("Error al vincular producto al grupo:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la vinculación"
+        });
+    }
+});
+
+router.put('/grupos-productos/modificar', verificarToken, async (req, res) => {
+    try {
+        const { id_grupo, id_producto, precio } = req.body;
+
+        if (!id_grupo || !id_producto || precio === undefined) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "Faltan datos obligatorios (id_grupo, id_producto, precio)"
+            });
+        }
+
+        const query = 'SELECT fn_actualizar_paquete_grupo_productos($1, $2, $3) AS resultado';
+        const result = await db.query(query, [id_grupo, id_producto, precio]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'Precio inválido') {
+            return res.status(400).json({ status: "error", mensaje });
+        }
+
+        if (mensaje === 'Relación no encontrada') {
+            return res.status(404).json({ status: "error", mensaje });
+        }
+
+        res.json({
+            status: "ok",
+            mensaje,
+            datos: { id_grupo, id_producto, nuevo_precio: precio }
+        });
+
+    } catch (err) {
+        console.error("Error al actualizar precio del item:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al actualizar el precio"
+        });
+    }
+});
+
+router.delete('/grupos-productos/desvincular', verificarToken, async (req, res) => {
+    try {
+        const { id_grupo, id_producto } = req.body;
+
+        if (!id_grupo || !id_producto) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "Se requiere id_grupo e id_producto para eliminar la relación."
+            });
+        }
+        const query = 'SELECT fn_baja_paquete_grupo_producto($1, $2) AS resultado';
+        const result = await db.query(query, [id_grupo, id_producto]);
+        
+        const mensajeRecibido = result.rows[0].resultado;
+        if (mensajeRecibido === 'No existe la relación') {
+            return res.status(404).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: mensajeRecibido,
+            datos_eliminados: { id_grupo, id_producto }
+        });
+
+    } catch (err) {
+        console.error("Error al eliminar item del grupo:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar eliminar el producto del grupo"
+        });
+    }
+});
+/////////////////////////////////
+//OBTENER TODAS LOS GRUPOS DE PAQUETES
+////////////////////////////////
+
+router.get('/menu-completo', async (req, res) => {
+    try {
+        const query = 'SELECT fn_get_menu_paquetes_completo() AS menu';
+        const result = await db.query(query);
+        res.json({
+            status: "ok",
+            datos: result.rows[0].menu || []
+        });
+
+    } catch (err) {
+        console.error("Error al obtener el menú de paquetes:", err.message);
+        res.status(500).json({ status: "error", mensaje: err.message });
+    }
+});
+
 module.exports = router; 
