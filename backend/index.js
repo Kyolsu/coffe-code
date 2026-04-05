@@ -9,6 +9,7 @@ const ProductosRutas=require('./rutas/productos')
 const menuRutas=require('./rutas/menu')
 const tiendaRutas=require('./rutas/tienda_modulos')
 const paquetesRutas=require('./rutas/paquetes')
+const paquetesPromociones=require('./rutas/promociones')
 app.use(express.json());
 app.use(cors());
 app.use(express.json());
@@ -23,6 +24,7 @@ app.use('/api/productos',ProductosRutas);
 app.use('/api/menu',menuRutas);
 app.use('/api/tienda',tiendaRutas);
 app.use('/api/paquetes',paquetesRutas);
+app.use('/api/promociones',paquetesPromociones);
 app.listen(port, () => {
   console.log(`Servidor corriendo en http://localhost:${port}`);
 }); 
