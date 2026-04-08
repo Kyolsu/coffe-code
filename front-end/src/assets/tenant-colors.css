@@ -1,41 +1,40 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
 
 :root {
-  /* ── COLORES DEL NEGOCIO (personalizar por tenant) ─────────────────────── */
-  --tenant-primario:    #c2600a;  /* café quemado — botones, acentos, links   */
-  --tenant-secundario:  #ffffff;  /* blanco                                   */
-  --tenant-fondo:       #f5f0eb; /* crema muy suave — fondo de páginas       */
-  --tenant-texto:       #1c1410; /* café casi negro — texto sobre fondo claro*/
-  --tenant-texto-muted: #7c6a5a; /* café medio — texto secundario, labels    */
+  /* ── COLORES DEL NEGOCIO (Comal++) ─────────────────────── */
+  --tenant-primario:    #002D72;  /* Azul Marino del Logo */
+  --tenant-secundario:  #5C2D6D;  /* Morado de los ++ */
+  --tenant-fondo:       #f9fafb;  /* Fondo muy claro / casi blanco */
+  --tenant-texto:       #111827;  /* Texto oscuro casi negro */
+  --tenant-texto-muted: #6b7280;  /* Texto gris secundario */
   --tenant-logo-url:    none;
   --tenant-fuente:      'DM Sans', sans-serif;
   --tenant-fuente-publica: ;
   --tenant-publico-primario: ;
   --tenant-publico-secundario: ;
 
-  /* ── COLORES DE SUPERFICIES CLARAS (no sobreescribir) ──────────────────── */
-  --color-superficie:     #ffffff;  /* cards, paneles, modales                */
-  --color-superficie-alt: #f0ebe5;  /* inputs sobre fondo claro               */
-  --color-borde:          #e8ddd5;  /* bordes sobre fondo claro               */
-  --color-hover:          #f0ebe5;  /* hover en botones ghost, nav items      */
+  /* ── COLORES DE SUPERFICIES CLARAS ──────────────────── */
+  --color-superficie:     #ffffff;  /* cards, paneles, modales */
+  --color-superficie-alt: #f3f4f6;  /* inputs sobre fondo claro */
+  --color-borde:          #e5e7eb;  /* bordes */
+  --color-hover:          #f3f4f6;  /* hover states */
 
-  /* ── COLORES DE SUPERFICIES OSCURAS (login card, sidebar, KD) ──────────── */
-  /* Úsalos en componentes con fondo oscuro para mantener el contraste        */
-  --color-oscuro-fondo:        #141110;  /* fondo de cards oscuras             */
-  --color-oscuro-input:        #1f1916;  /* fondo de inputs sobre card oscura  */
-  --color-oscuro-borde:        #2e2420;  /* borde de inputs/cards oscuras      */
-  --color-oscuro-texto:        #f0ebe5;  /* texto principal sobre fondo oscuro */
-  --color-oscuro-texto-muted:  #9a8070;  /* texto secundario sobre fondo oscuro*/
-  --color-oscuro-placeholder:  #5a4a40;  /* placeholder sobre fondo oscuro     */
+  /* ── COLORES DE SUPERFICIES OSCURAS (Sidebar) ──────────── */
+  --color-oscuro-fondo:        #001a45;  /* Azul muy oscuro para contraste */
+  --color-oscuro-input:        #00225c;  
+  --color-oscuro-borde:        #003380;  
+  --color-oscuro-texto:        #f3f4f6;  
+  --color-oscuro-texto-muted:  #9ca3af;  
+  --color-oscuro-placeholder:  #6b7280;  
 
-  /* ── COLORES DEL SISTEMA (no sobreescribir) ────────────────────────────── */
+  /* ── COLORES DEL SISTEMA ────────────────────────────── */
   --color-exitoso:     #16a34a;
   --color-advertencia: #d97706;
   --color-error:       #dc2626;
   --color-info:        #2563eb;
   --color-cancelar:    #ef4444;
 
-  /* ── COLORES DE ÓRDENES (no sobreescribir) ─────────────────────────────── */
+  /* ── COLORES DE ÓRDENES ─────────────────────────────── */
   --color-orden-pendiente:   #d97706;
   --color-orden-preparacion: #2563eb;
   --color-orden-lista:       #16a34a;
@@ -73,8 +72,8 @@
 
 body {
   margin: 0;
-  font-family: var(--tenant-fuente, 'DM Sans', sans-serif);
-  background-color: var(--tenant-fondo, #f5f0eb);
-  color: var(--tenant-texto, #1c1410);
+  font-family: var(--tenant-fuente);
+  background-color: var(--tenant-fondo);
+  color: var(--tenant-texto);
   -webkit-font-smoothing: antialiased;
 }
