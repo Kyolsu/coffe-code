@@ -143,5 +143,100 @@ router.get('/mostrar', async (req, res) => {
 // PROMOCIONES PAQUETES
 //////////////////////////////////////////////////////////////////
 
+router.get('/paquetes/mostrar',verificarToken, async (req, res) => {
+    try {
+        const query = 'Select * from v_promocion_paquetes';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay columnas en la tabla promociones paquetes",
+                datos: []
+            });
+        }
+    
+        res.json({
+            status: "ok",
+            mensaje: "Lista de promociones vinculadas a paquetes",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener las promociones vinculadas a los paquetes:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener la informacion" 
+        });
+    }
+}); 
+
+router.post('/paquetes/vincular', verificarToken, async (req, res) => {
+    try {
+        const { id_promocion, id_paquete } = req.body;
+
+        if (!id_promocion || !id_paquete) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_promocion e id_paquete son obligatorios."
+            });
+        }
+
+        const query = 'SELECT fn_alta_promocion_paquete($1, $2) AS resultado';
+        const result = await db.query(query, [id_promocion, id_paquete]);
+        const mensaje = result.rows[0].resultado;
+
+        // Si la función retorna que ya existe, mandamos un código 409 (Conflicto)
+        if (mensaje === 'El paquete ya está en esta promoción') {
+            return res.status(409).json({
+                status: "error",
+                mensaje
+            });
+        }
+
+        res.status(201).json({
+            status: "ok",
+            mensaje,
+            datos: { id_promocion, id_paquete }
+        });
+
+    } catch (err) {
+        console.error("Error al asignar paquete a promoción:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la vinculación"
+        });
+    }
+});
+
+router.delete('/paquetes/desvincular', verificarToken, async (req, res) => {
+    try {
+        const { id_promocion, id_paquete } = req.body;
+
+        if (!id_promocion || !id_paquete) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_promocion e id_paquete son necesarios para la eliminación."
+            });
+        }
+
+        const query = 'SELECT fn_baja_promocion_paquete($1, $2) AS resultado';
+        const result = await db.query(query, [id_promocion, id_paquete]);
+        const mensaje = result.rows[0].resultado;
+
+        res.json({
+            status: "ok",
+            mensaje,
+            datos_eliminados: { id_promocion, id_paquete }
+        });
+
+    } catch (err) {
+        console.error("Error al desvincular paquete de promoción:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar eliminar la relación"
+        });
+    }
+});
 
 module.exports = router; 
