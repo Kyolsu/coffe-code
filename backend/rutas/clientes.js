@@ -267,4 +267,178 @@ router.put('/beneficio/modificar/:id', verificarToken, async (req, res) => {
     }
 });
 
+//////////////////////////////////////////////
+//CLIENTES BENEFICIOS
+//////////////////////////////////////////////
+//MOSTRAR CLIENTES BENEFICIOS
+router.get('/beneficio-clientes/mostrar',verificarToken, async (req, res) => {
+    try {
+        const query = 'SELECT * from v_cliente_beneficio';
+        
+        const result = await db.query(query);
+
+        // no hay beneficios
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay ningun beneficio",
+                datos: []
+            });
+        }
+
+    
+        res.json({
+            status: "ok",
+            mensaje: "Lista de beneficios obtenida",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener beneficios:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al consultar beneficios" 
+        });
+    }
+});
+
+router.post('/beneficio-clientes/agregar', verificarToken, async (req, res) => {
+    try {
+        const { 
+            id_cliente, 
+            id_tipo_beneficio, 
+            fecha_inicio, 
+            cantidad, 
+            fecha_fin, 
+            dias 
+        } = req.body;
+
+        if (!id_cliente || !id_tipo_beneficio || !fecha_inicio) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_cliente, id_tipo_beneficio y fecha_inicio son obligatorios."
+            });
+        }
+        const query = `
+            SELECT fn_alta_cliente_beneficio($1, $2, $3, $4, $5, $6) AS id_asignacion
+        `;
+        
+        const values = [
+            id_cliente,
+            id_tipo_beneficio,
+            fecha_inicio,
+            cantidad !== undefined ? cantidad : 0,
+            fecha_fin || null,
+            dias || null
+        ];
+
+        const result = await db.query(query, values);
+        
+        res.status(201).json({
+            status: "ok",
+            mensaje: "Beneficio asignado correctamente al cliente",
+            id_cliente_beneficio: result.rows[0].id_asignacion
+        });
+
+    } catch (err) {
+        console.error("Error al asignar beneficio:", err.message);
+        if (err.message.includes('Cantidad no puede ser negativa')) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "La cantidad de beneficios debe ser un número positivo."
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la asignación del beneficio"
+        });
+    }
+});
+
+router.delete('/beneficio-clientes/desactivar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const query = 'SELECT fn_baja_cliente_beneficio($1) AS resultado';
+        const result = await db.query(query, [id]);
+
+        const mensajeRecibido = result.rows[0].resultado;
+
+        if (mensajeRecibido === 'No existe el registro') {
+            return res.status(404).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: mensajeRecibido,
+            id_desactivado: id
+        });
+
+    } catch (err) {
+        console.error("Error al dar de baja el beneficio del cliente:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar desactivar el beneficio"
+        });
+    }
+});
+
+router.put('/beneficio-clientes/modificar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { 
+            disponible, 
+            usado, 
+            fecha_inicio, 
+            fecha_fin, 
+            dias, 
+            activo 
+        } = req.body;
+
+        const query = `
+            SELECT fn_actualizar_cliente_beneficio($1, $2, $3, $4, $5, $6, $7) AS resultado
+        `;
+        
+        const values = [
+            id,
+            disponible !== undefined ? disponible : null,
+            usado !== undefined ? usado : null,
+            fecha_inicio || null,
+            fecha_fin || null,
+            dias || null,
+            activo !== undefined ? activo : null
+        ];
+
+        const result = await db.query(query, values);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'No existe el registro') {
+            return res.status(404).json({
+                status: "error",
+                mensaje
+            });
+        }
+
+        if (mensaje === 'Cantidad inválida') {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "La cantidad disponible no puede ser menor a 0"
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: "Beneficio actualizado correctamente",
+            datos_actualizados: { id, ...req.body }
+        });
+
+    } catch (err) {
+        console.error("Error al actualizar beneficio del cliente:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la actualización del beneficio"
+        });
+    }
+});
 module.exports = router; 
