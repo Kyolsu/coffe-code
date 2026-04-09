@@ -1,605 +1,368 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import Sidebar from '../components/Sidebar.vue'
 import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
-const API_URL   = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
-// ── ESTADO DE DATOS ────────────────────────────────────
-const usuarios = ref<any[]>([])
-const rolesList = ref<any[]>([]) // Lista dinámica de roles desde la BD
-const searchQuery = ref('')
-
-const fetchRoles = async () => {
-  try {
-    const res = await fetch(`${API_URL}/api/usuarios/rol/mostrar`, {
-      headers: authStore.authHeaders()
-    })
-    const data = await res.json()
-    rolesList.value = data.status === 'ok' ? data.datos : []
-  } catch (error) {
-    console.error("Error al cargar roles:", error)
-  }
-}
-
-const fetchUsuarios = async () => {
-  try {
-    const res = await fetch(`${API_URL}/api/usuarios/todos-usuarios`, {
-      headers: authStore.authHeaders()
-    })
-    const data = await res.json()
-    usuarios.value = data.status === 'ok' ? data.datos : []
-  } catch (error) {
-    console.error("Error al cargar usuarios:", error)
-  }
-}
-
-onMounted(() => {
-  fetchRoles()
-  fetchUsuarios()
+// ── VERIFICACIÓN DE ROL ──────────────────────────────────────────────────────
+// Validamos si el rol viene como texto ("admin") o como ID numérico (1)
+const isAdmin = computed(() => {
+  const rol = authStore.rol;
+  // Convertimos a minúsculas por si acaso llega como "Admin" o "ADMIN"
+  return String(rol).toLowerCase() === 'admin' || Number(rol) === 1;
 })
 
+// ── ESTADOS GLOBALES ─────────────────────────────────────────────────────────
+const usuarios = ref<any[]>([])
+const roles = ref<any[]>([])
+const isLoading = ref(false)
+const API_BASE = 'http://localhost:3000/api'
+
+// ── ESTADOS DE FILTROS ───────────────────────────────────────────────────────
+const searchQuery = ref('')
+const roleFilter = ref('')
+
+// ── UTILIDAD PARA LIMPIAR TEXTOS ─────────────────────────────────────────────
+const cleanText = (str: string) => {
+  if (!str) return ''
+  return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
+// ── FETCH BASE ───────────────────────────────────────────────────────────────
+const fetchConToken = async (endpoint: string, method = 'GET', body: any = null) => {
+  try {
+    const options: RequestInit = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'auth-token': authStore.token || '' 
+      }
+    }
+    if (body) options.body = JSON.stringify(body)
+
+    const response = await fetch(`${API_BASE}${endpoint}`, options)
+    // Manejo de respuestas vacías (ej. un DELETE sin body)
+    const text = await response.text()
+    return text ? JSON.parse(text) : { status: 'ok' }
+  } catch (error) {
+    console.error(`Error en ${endpoint}:`, error)
+    return { status: 'error', mensaje: 'Error de conexión' }
+  }
+}
+
+// ── CARGAS DE DATOS ──────────────────────────────────────────────────────────
+const loadUsuarios = async () => {
+  isLoading.value = true
+  // Endpoint: Mostrar usuarios
+  const res = await fetchConToken('/usuarios/todos-usuarios')
+  usuarios.value = res.datos || res || [] 
+  isLoading.value = false
+}
+
+const loadRoles = async () => {
+  // Endpoint: Mostrar roles
+  const res = await fetchConToken('/usuarios/rol/mostrar')
+  roles.value = res.datos || res || []
+}
+
+// ── ESTADOS Y LÓGICA DEL MODAL ───────────────────────────────────────────────
+const showModal = ref(false)
+const modalType = ref<'crear' | 'editar' | 'eliminar'>('crear')
+const formData = ref<Record<string, any>>({})
+const isSubmitting = ref(false)
+
+const openModal = (type: 'crear' | 'editar' | 'eliminar', user: any = null) => {
+  if (!isAdmin.value) return // Doble validación por seguridad
+
+  modalType.value = type
+  if (type === 'crear') {
+    formData.value = { usuario: '', contra: '', rol: '' }
+  } else if (type === 'editar') {
+    // Según la doc, actualizar pide usuario_actual, contra_actual, nuevo_nombre, nueva_contra
+    formData.value = { 
+      usuario_actual: user.nombre_usuario || user.nombre || user.usuario, 
+      contra_actual: '', 
+      nuevo_nombre: user.nombre_usuario || user.nombre || user.usuario,
+      nueva_contra: ''
+    }
+  } else if (type === 'eliminar') {
+    // Según la doc, eliminar pide usuario y contra
+    formData.value = { 
+      usuario: user.nombre_usuario || user.nombre || user.usuario, 
+      contra: '' 
+    }
+  }
+  showModal.value = true
+}
+
+const closeModal = () => {
+  showModal.value = false
+  formData.value = {}
+}
+
+const handleSubmit = async () => {
+  isSubmitting.value = true
+  let endpoint = ''
+  let method = 'POST'
+  let payload = { ...formData.value }
+
+  switch (modalType.value) {
+    case 'crear':
+      endpoint = '/usuarios/registro'
+      // Payload esperado: { usuario, contra, rol }
+      break
+    case 'editar':
+      endpoint = '/usuarios/actualizar'
+      // Limpiamos campos vacíos si solo cambia el nombre o la contraseña
+      if (!payload.nueva_contra) delete payload.nueva_contra
+      if (payload.nuevo_nombre === payload.usuario_actual) delete payload.nuevo_nombre
+      break
+    case 'eliminar':
+      endpoint = '/usuarios/eliminar'
+      method = 'DELETE'
+      break
+  }
+
+  const res = await fetchConToken(endpoint, method, payload)
+  isSubmitting.value = false
+
+  if (res.status === 'ok' || res.status === 200 || res.mensaje?.includes('correctamente')) {
+    closeModal()
+    loadUsuarios()
+  } else {
+    alert(`Error: ${res.mensaje || 'No se pudo procesar la solicitud'}`)
+  }
+}
+
+// ── FILTROS COMPUTADOS ───────────────────────────────────────────────────────
+const term = computed(() => cleanText(searchQuery.value))
+
 const filteredUsuarios = computed(() => {
-  const q = searchQuery.value.toLowerCase()
   return usuarios.value.filter(u => {
-    const nombre = (u.nombre_usuario || u.usuario || u.nombre || '').toLowerCase()
-    return nombre.includes(q)
+    const nombre = u.nombre_usuario || u.nombre || u.usuario || ''
+    const nombreRol = u.nombre_rol || ''
+    const matchSearch = cleanText(nombre).includes(term.value)
+    
+    // Asumiendo que el id del rol viene en u.id_rol o u.rol
+    const currentRolId = u.id_rol || u.rol
+    const matchRole = roleFilter.value === '' ? true : currentRolId === Number(roleFilter.value)
+    
+    return matchSearch && matchRole
   })
 })
 
-// ── TOAST ──────────────────────────────────────────────
-const toast = ref<{ tipo: 'ok' | 'error'; mensaje: string } | null>(null)
-let toastTimer: ReturnType<typeof setTimeout>
-
-const mostrarToast = (tipo: 'ok' | 'error', mensaje: string) => {
-  clearTimeout(toastTimer)
-  toast.value = { tipo, mensaje }
-  toastTimer = setTimeout(() => { toast.value = null }, 3500)
-}
-
-// ── MODAL CREAR ────────────────────────────────────────
-const modalCrear  = ref(false)
-const creando     = ref(false)
-const errorCrear  = ref('')
-const formCrear   = ref({ usuario: '', contra: '', rol: '' as number | string })
-
-const registrarUsuario = async () => {
-  if (!formCrear.value.rol) {
-    errorCrear.value = 'Debes seleccionar un rol'
-    return
-  }
-
-  creando.value    = true
-  errorCrear.value = ''
-  try {
-    const res  = await fetch(`${API_URL}/api/usuarios/registro`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        usuario: formCrear.value.usuario,
-        contra:  formCrear.value.contra,
-        rol:     formCrear.value.rol,
-      }),
-    })
-    const data = await res.json()
-    if (data.status === 'ok') {
-      mostrarToast('ok', `Usuario "${formCrear.value.usuario}" registrado`)
-      cerrarModalCrear()
-      fetchUsuarios() 
-    } else {
-      errorCrear.value = data.mensaje
-    }
-  } catch {
-    errorCrear.value = 'No se pudo conectar con el servidor'
-  } finally {
-    creando.value = false
-  }
-}
-
-const cerrarModalCrear = () => {
-  modalCrear.value  = false
-  errorCrear.value  = ''
-  formCrear.value   = { usuario: '', contra: '', rol: '' }
-}
-
-// ── MODAL MODIFICAR ────────────────────────────────────
-const modalModificar  = ref(false)
-const modificando     = ref(false)
-const errorModificar  = ref('')
-const formModificar   = ref({
-  usuario_actual: '',
-  contra_actual:  '',
-  nuevo_nombre:   '',
-  nueva_contra:   ''
+onMounted(() => {
+  loadUsuarios()
+  loadRoles()
 })
-
-const abrirModalModificar = (user: any) => {
-  const nombreActual = user.nombre_usuario || user.usuario || user.nombre;
-  formModificar.value = {
-    usuario_actual: nombreActual,
-    contra_actual:  '',
-    nuevo_nombre:   nombreActual, 
-    nueva_contra:   ''
-  }
-  modalModificar.value = true
-}
-
-const actualizarUsuario = async () => {
-  modificando.value    = true
-  errorModificar.value = ''
-  try {
-    const body: any = {
-      usuario_actual: formModificar.value.usuario_actual,
-      contra_actual:  formModificar.value.contra_actual
-    }
-    if (formModificar.value.nuevo_nombre.trim()) body.nuevo_nombre = formModificar.value.nuevo_nombre.trim()
-    if (formModificar.value.nueva_contra.trim()) body.nueva_contra = formModificar.value.nueva_contra.trim()
-
-    const res  = await fetch(`${API_URL}/api/usuarios/actualizar`, {
-      method: 'PUT',
-      headers: authStore.authHeaders(),
-      body: JSON.stringify(body),
-    })
-    const data = await res.json()
-    if (data.status === 'ok') {
-      mostrarToast('ok', 'Usuario actualizado correctamente')
-      cerrarModalModificar()
-      fetchUsuarios() 
-    } else {
-      errorModificar.value = data.mensaje
-    }
-  } catch {
-    errorModificar.value = 'No se pudo conectar con el servidor'
-  } finally {
-    modificando.value = false
-  }
-}
-
-const cerrarModalModificar = () => {
-  modalModificar.value  = false
-  errorModificar.value  = ''
-}
-
-// ── MODAL ELIMINAR ─────────────────────────────────────
-const modalEliminar  = ref(false)
-const eliminando     = ref(false)
-const errorEliminar  = ref('')
-const formEliminar   = ref({ usuario: '', contra: '' })
-
-const abrirModalEliminar = (user: any) => {
-  formEliminar.value = {
-    usuario: user.nombre_usuario || user.usuario || user.nombre,
-    contra: ''
-  }
-  modalEliminar.value = true
-}
-
-const eliminarUsuario = async () => {
-  eliminando.value    = true
-  errorEliminar.value = ''
-  try {
-    const res  = await fetch(`${API_URL}/api/usuarios/eliminar`, {
-      method: 'DELETE',
-      headers: authStore.authHeaders(),
-      body: JSON.stringify({
-        usuario: formEliminar.value.usuario,
-        contra: formEliminar.value.contra
-      }),
-    })
-    const data = await res.json()
-    if (data.status === 'ok') {
-      mostrarToast('ok', `Usuario "${formEliminar.value.usuario}" eliminado`)
-      cerrarModalEliminar()
-      fetchUsuarios() 
-    } else {
-      errorEliminar.value = data.mensaje
-    }
-  } catch {
-    errorEliminar.value = 'No se pudo conectar con el servidor'
-  } finally {
-    eliminando.value = false
-  }
-}
-
-const cerrarModalEliminar = () => {
-  modalEliminar.value  = false
-  errorEliminar.value  = ''
-}
 </script>
 
 <template>
-  <div class="usuarios-layout">
-    <Sidebar />
+  <div class="menu-container">
+    <header class="menu-header">
+  <h1 class="page-title">Gestión de Usuarios</h1>
+  <p class="page-subtitle">Visualiza y administra los accesos al sistema POS.</p>
+</header>
 
-    <main class="usuarios-main">
+    <div v-if="!isAdmin" class="alert-banner">
+      <strong>Aviso:</strong> Tienes permisos de solo lectura. Únicamente el Administrador puede crear, modificar o dar de baja usuarios.
+    </div>
 
-      <header class="page-header">
-        <div class="header-titles">
-          <p class="header-label">Administración</p>
-          <h1 class="page-title">Usuarios</h1>
-        </div>
-        
-        <div class="header-actions">
-          <div class="search-bar">
-            <svg class="search-icon" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="1.5"/><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            <input
-              v-model="searchQuery"
-              type="text"
-              placeholder="Buscar usuario..."
-              class="search-input"
-            />
-          </div>
-          <button class="btn-primary" @click="modalCrear = true">
-            <svg viewBox="0 0 24 24" fill="none" style="width:16px; height:16px;"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            Nuevo Usuario
-          </button>
-        </div>
-      </header>
-
-      <div class="table-container">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Nombre de Usuario</th>
-              <th>Rol</th>
-              <th class="th-actions">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="u in filteredUsuarios" :key="u.id_usuario || u.id">
-              <td>#{{ u.id_usuario || u.id }}</td>
-              <td class="td-bold">{{ u.nombre_usuario || u.usuario || u.nombre }}</td>
-              <td>
-                <span class="role-badge">{{ u.nombre_rol || 'Desconocido' }}</span>
-              </td>
-              <td class="td-actions">
-                <button class="action-btn btn-edit" @click="abrirModalModificar(u)" title="Editar usuario">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </button>
-                <button class="action-btn btn-delete" @click="abrirModalEliminar(u)" title="Eliminar usuario">
-                  <svg viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="currentColor" stroke-width="1.5"/></svg>
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <div v-if="filteredUsuarios.length === 0" class="empty-state">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          <p>No se encontraron usuarios.</p>
-        </div>
+    <div class="toolbar">
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input v-model="searchQuery" type="text" placeholder="Buscar usuario..." class="search-input" />
       </div>
 
-      <div class="watermark">
-        <span>Software por</span>
-        <strong>CoffeeCode</strong>
+      <div class="filters-group">
+        <select v-model="roleFilter" class="filter-select">
+          <option value="">Todos los Roles</option>
+          <option v-for="rol in roles" :key="rol.id_rol" :value="rol.id_rol">
+            {{ rol.nombre_rol }}
+          </option>
+        </select>
+      </div>
+
+      <div class="actions-group">
+        <button v-if="isAdmin" @click="openModal('crear')" class="btn-primary">
+          + Nuevo Usuario
+        </button>
+      </div>
+    </div>
+
+    <main class="tab-content">
+      <div v-if="isLoading" class="loading-state">Cargando usuarios...</div>
+
+      <div v-else class="grid-container">
+        <div v-if="filteredUsuarios.length === 0" class="empty-state">No se encontraron usuarios.</div>
+        
+        <div v-for="user in filteredUsuarios" :key="user.id_usuario || user.id" class="card">
+          <div class="card-header">
+            <div class="user-info">
+              <div class="avatar-placeholder">
+                {{ (user.nombre_usuario || user.nombre || user.usuario || '?').charAt(0).toUpperCase() }}
+              </div>
+              <h3 class="card-title">{{ user.nombre_usuario || user.nombre || user.usuario }}</h3>
+            </div>
+          </div>
+          
+          <div class="card-footer mt-auto">
+            <div class="badges-container">
+              <span class="badge role-badge">{{ user.nombre_rol || 'Rol: ' + (user.id_rol || user.rol) }}</span>
+            </div>
+            
+            <div v-if="isAdmin" class="actions-container">
+              <button @click="openModal('editar', user)" class="action-btn edit-btn" title="Editar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              </button>
+              <button @click="openModal('eliminar', user)" class="action-btn delete-btn" title="Dar de Baja">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
 
-    <Transition name="toast">
-      <div v-if="toast" class="toast" :class="`toast--${toast.tipo}`">
-        <svg v-if="toast.tipo === 'ok'" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
-          <path d="M8 12l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
-          <path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-        {{ toast.mensaje }}
-      </div>
-    </Transition>
-
-    <Transition name="modal">
-      <div v-if="modalCrear" class="modal-overlay" @click.self="cerrarModalCrear">
-        <div class="modal">
-          <div class="modal-header">
-            <h2>Registrar usuario</h2>
-            <button class="modal-close" @click="cerrarModalCrear">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            </button>
-          </div>
-          <div class="modal-body">
-            <div class="field">
-              <label>Nombre de usuario</label>
-              <input v-model="formCrear.usuario" placeholder="usuario123" autocomplete="off" />
+    <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+      <div class="modal-content">
+        <h2 class="modal-title">
+          {{ modalType === 'crear' ? 'Registrar Usuario' : modalType === 'editar' ? 'Modificar Usuario' : 'Confirmar Baja' }}
+        </h2>
+        
+        <form @submit.prevent="handleSubmit" class="modal-form">
+          
+          <template v-if="modalType === 'crear'">
+            <div class="form-group">
+              <label>Nombre de Usuario:</label>
+              <input v-model="formData.usuario" type="text" required class="form-input" />
             </div>
-            <div class="field">
-              <label>Contraseña</label>
-              <input v-model="formCrear.contra" type="password" placeholder="••••••••" />
+            <div class="form-group">
+              <label>Contraseña:</label>
+              <input v-model="formData.contra" type="password" required class="form-input" />
             </div>
-            <div class="field">
-              <label>Rol</label>
-              <select v-model="formCrear.rol">
-                <option value="" disabled>Seleccione un rol...</option>
-                <option v-for="r in rolesList" :key="r.id_rol" :value="r.id_rol">
-                  {{ r.nombre_rol }}
-                </option>
+            <div class="form-group">
+              <label>Asignar Rol:</label>
+              <select v-model="formData.rol" required class="form-select">
+                <option disabled value="">Selecciona un rol...</option>
+                <option v-for="rol in roles" :key="rol.id_rol" :value="rol.id_rol">{{ rol.nombre_rol }}</option>
               </select>
             </div>
-            <div v-if="errorCrear" class="error-msg">{{ errorCrear }}</div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn-ghost" @click="cerrarModalCrear">Cancelar</button>
-            <button class="btn-primary" :disabled="creando" @click="registrarUsuario">
-              <span v-if="!creando">Registrar</span><span v-else class="spinner"></span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
+          </template>
 
-    <Transition name="modal">
-      <div v-if="modalModificar" class="modal-overlay" @click.self="cerrarModalModificar">
-        <div class="modal">
-          <div class="modal-header">
-            <h2>Modificar usuario</h2>
-            <button class="modal-close" @click="cerrarModalModificar">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            </button>
-          </div>
-          <div class="modal-body">
-            <p class="hint-msg">Por seguridad, ingresa la contraseña actual de <strong>{{ formModificar.usuario_actual }}</strong> para confirmar los cambios.</p>
-            
-            <div class="field">
-              <label>Contraseña actual (Requerida)</label>
-              <input v-model="formModificar.contra_actual" type="password" placeholder="••••••••" />
+          <template v-if="modalType === 'editar'">
+            <div class="alert-info">
+              Para guardar los cambios, la API requiere la contraseña actual.
             </div>
-            <div class="field">
-              <label>Nuevo nombre de usuario</label>
-              <input v-model="formModificar.nuevo_nombre" placeholder="Nuevo nombre" autocomplete="off" />
+            <div class="form-group">
+              <label>Nuevo Nombre de Usuario (Opcional):</label>
+              <input v-model="formData.nuevo_nombre" type="text" class="form-input" />
             </div>
-            <div class="field">
-              <label>Nueva contraseña</label>
-              <input v-model="formModificar.nueva_contra" type="password" placeholder="Dejar en blanco para no cambiar" />
+            <div class="form-group">
+              <label>Nueva Contraseña (Opcional):</label>
+              <input v-model="formData.nueva_contra" type="password" placeholder="Dejar en blanco si no cambia" class="form-input" />
             </div>
-            <div v-if="errorModificar" class="error-msg">{{ errorModificar }}</div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn-ghost" @click="cerrarModalModificar">Cancelar</button>
-            <button class="btn-secondary" :disabled="modificando" @click="actualizarUsuario">
-              <span v-if="!modificando">Guardar cambios</span><span v-else class="spinner"></span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
+            <hr style="border-top: 1px dashed var(--color-borde); width: 100%; margin: 8px 0;" />
+            <div class="form-group">
+              <label>Usuario Actual (Requerido):</label>
+              <input v-model="formData.usuario_actual" type="text" readonly class="form-input disabled-input" />
+            </div>
+            <div class="form-group">
+              <label>Contraseña Actual (Requerida):</label>
+              <input v-model="formData.contra_actual" type="password" required class="form-input" />
+            </div>
+          </template>
 
-    <Transition name="modal">
-      <div v-if="modalEliminar" class="modal-overlay" @click.self="cerrarModalEliminar">
-        <div class="modal">
-          <div class="modal-header">
-            <h2>Eliminar usuario</h2>
-            <button class="modal-close" @click="cerrarModalEliminar">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            </button>
-          </div>
-          <div class="modal-body">
-            <p class="hint-msg">
-              Por seguridad, ingresa la contraseña actual de <strong>{{ formEliminar.usuario }}</strong> para dar de baja su cuenta. Esta acción no se puede deshacer.
-            </p>
-            <div class="field">
-              <label>Contraseña del usuario</label>
-              <input v-model="formEliminar.contra" type="password" placeholder="••••••••" />
+          <template v-if="modalType === 'eliminar'">
+            <div class="alert-danger">
+              ¿Estás seguro que deseas dar de baja a este usuario? Esta acción requiere la contraseña de la cuenta.
             </div>
-            <div v-if="errorEliminar" class="error-msg">{{ errorEliminar }}</div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn-ghost" @click="cerrarModalEliminar">Cancelar</button>
-            <button class="btn-danger" :disabled="eliminando" @click="eliminarUsuario">
-              <span v-if="!eliminando">Sí, eliminar</span><span v-else class="spinner"></span>
+            <div class="form-group">
+              <label>Usuario a eliminar:</label>
+              <input v-model="formData.usuario" type="text" readonly class="form-input disabled-input" />
+            </div>
+            <div class="form-group">
+              <label>Contraseña (Requerida por API):</label>
+              <input v-model="formData.contra" type="password" required class="form-input" />
+            </div>
+          </template>
+
+          <div class="modal-actions">
+            <button type="button" @click="closeModal" class="btn-cancel" :disabled="isSubmitting">Cancelar</button>
+            <button type="submit" :class="modalType === 'eliminar' ? 'btn-danger' : 'btn-primary'" :disabled="isSubmitting">
+              {{ isSubmitting ? 'Procesando...' : (modalType === 'eliminar' ? 'Dar de Baja' : 'Guardar') }}
             </button>
           </div>
-        </div>
+        </form>
       </div>
-    </Transition>
+    </div>
 
   </div>
 </template>
 
 <style scoped>
-/* ── LAYOUT ── */
-.usuarios-layout { 
-  display: flex; 
-  min-height: 100vh; 
-  background: var(--tenant-fondo); 
-  font-family: var(--tenant-fuente, sans-serif);
-}
+/* ── ESTILOS REUTILIZADOS DE MENU.VUE Y TENANT-COLORS ── */
+.menu-container { padding: var(--espacio-6, 24px); color: var(--tenant-texto, #111827); display: flex; flex-direction: column; gap: var(--espacio-6, 24px); min-height: 100%; }
+.menu-header { display: flex; flex-direction: column; gap: var(--espacio-2, 8px); }
+.page-title { font-size: var(--font-size-2xl, 30px); font-weight: var(--font-weight-bold, 600); margin: 0; }
+.page-subtitle { font-size: var(--font-size-base, 15px); color: var(--tenant-texto-muted, #6b7280); margin: 0; }
 
-.usuarios-main {
-  flex: 1;
-  padding: var(--espacio-6, 24px) var(--espacio-8, 32px);
-  display: flex;
-  flex-direction: column;
-  gap: var(--espacio-6, 24px);
-  position: relative;
-  overflow-y: auto;
-}
+.alert-banner { background-color: rgba(37, 99, 235, 0.1); border-left: 4px solid var(--color-info, #2563eb); padding: var(--espacio-3, 12px) var(--espacio-4, 16px); color: var(--tenant-texto); border-radius: 4px; font-size: var(--font-size-sm, 13px); }
+.alert-info { background-color: rgba(37, 99, 235, 0.1); color: var(--color-info, #2563eb); padding: 8px 12px; border-radius: 6px; font-size: var(--font-size-xs, 11px); }
+.alert-danger { background-color: rgba(220, 38, 38, 0.1); color: var(--color-error, #dc2626); padding: 8px 12px; border-radius: 6px; font-size: var(--font-size-sm, 13px); }
 
-/* ── HEADER ── */
-.page-header { 
-  display: flex; 
-  align-items: flex-end; 
-  justify-content: space-between; 
-}
-.header-label { margin: 0; font-size: var(--font-size-xs, 11px); text-transform: uppercase; letter-spacing: 0.1em; color: color-mix(in srgb, var(--tenant-texto) 60%, transparent); font-weight: var(--font-weight-medium, 500); }
-.page-title { margin: 0; font-size: var(--font-size-2xl, 30px); font-weight: var(--font-weight-bold, 600); color: var(--tenant-texto); }
+.toolbar { display: flex; flex-wrap: wrap; gap: var(--espacio-4, 16px); align-items: center; justify-content: space-between; background: var(--color-superficie, #ffffff); padding: var(--espacio-3, 12px) var(--espacio-4, 16px); border-radius: 8px; border: 1px solid var(--color-borde, #e5e7eb); }
+.search-box { display: flex; align-items: center; gap: var(--espacio-2, 8px); background: var(--color-superficie-alt, #f3f4f6); padding: var(--espacio-2, 8px) var(--espacio-3, 12px); border-radius: 6px; flex: 1; min-width: 250px; max-width: 400px; border: 1px solid transparent; transition: border-color 0.2s; }
+.search-box:focus-within { border-color: var(--tenant-primario, #002D72); background: var(--color-superficie, #ffffff); }
+.search-icon { width: 18px; height: 18px; color: var(--tenant-texto-muted, #6b7280); }
+.search-input { border: none; background: transparent; outline: none; width: 100%; font-size: var(--font-size-sm, 13px); color: var(--tenant-texto, #111827); font-family: inherit; }
 
-.header-actions {
-  display: flex;
-  gap: var(--espacio-3, 12px);
-  align-items: center;
-}
+.filters-group { display: flex; gap: var(--espacio-3, 12px); flex-wrap: wrap; }
+.filter-select { padding: var(--espacio-2, 8px) var(--espacio-3, 12px); font-size: var(--font-size-sm, 13px); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; background-color: var(--color-superficie, #ffffff); color: var(--tenant-texto, #111827); outline: none; cursor: pointer; }
 
-.search-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--espacio-2, 8px);
-  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
-  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
-  border-radius: 50px;
-  padding: var(--espacio-2, 8px) var(--espacio-4, 16px);
-  transition: border-color 0.2s;
-  width: 250px;
-}
-.search-bar:focus-within { border-color: var(--tenant-primario); }
-.search-icon { width: 16px; height: 16px; color: color-mix(in srgb, var(--tenant-texto) 60%, transparent); flex-shrink: 0; }
-.search-input { background: none; border: none; outline: none; color: var(--tenant-texto); font-size: var(--font-size-sm, 13px); width: 100%; font-family: var(--tenant-fuente, sans-serif); }
-.search-input::placeholder { color: color-mix(in srgb, var(--tenant-texto) 40%, transparent); }
+.btn-primary { background-color: var(--tenant-primario, #002D72); color: white; padding: 8px 16px; border-radius: 6px; border: none; font-size: var(--font-size-sm, 13px); font-weight: 500; cursor: pointer; transition: opacity 0.2s; white-space: nowrap; }
+.btn-primary:hover { opacity: 0.9; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ── TABLA DE USUARIOS ── */
-.table-container {
-  background: color-mix(in srgb, var(--tenant-fondo) 95%, black 5%);
-  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
-  border-radius: 12px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
+.btn-danger { background-color: var(--color-cancelar, #ef4444); color: white; padding: 8px 16px; border-radius: 6px; border: none; font-size: var(--font-size-sm, 13px); font-weight: 500; cursor: pointer; transition: opacity 0.2s; white-space: nowrap; }
+.btn-danger:hover { opacity: 0.9; }
 
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-}
+.btn-cancel { background-color: transparent; color: var(--tenant-texto-muted, #6b7280); padding: 8px 16px; border-radius: 6px; border: 1px solid var(--color-borde, #e5e7eb); font-size: var(--font-size-sm, 13px); font-weight: 500; cursor: pointer; transition: background 0.2s; }
+.btn-cancel:hover { background-color: var(--color-superficie-alt, #f3f4f6); }
 
-.data-table th, .data-table td {
-  padding: var(--espacio-3, 12px) var(--espacio-4, 16px);
-  text-align: left;
-  border-bottom: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
-}
+.tab-content { flex: 1; }
+.grid-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--espacio-4, 16px); }
+.card { background-color: var(--color-superficie, #ffffff); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 8px; padding: var(--espacio-4, 16px); display: flex; flex-direction: column; gap: var(--espacio-3, 12px); transition: box-shadow 0.2s, border-color 0.2s; }
+.card:hover { border-color: var(--tenant-primario, #002D72); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
 
-.data-table th {
-  background: color-mix(in srgb, var(--tenant-texto) 2%, transparent);
-  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
-  font-size: var(--font-size-xs, 11px);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: var(--font-weight-medium, 500);
-}
+.card-header { display: flex; justify-content: space-between; align-items: center; gap: var(--espacio-2, 8px); }
+.user-info { display: flex; align-items: center; gap: var(--espacio-3, 12px); }
+.avatar-placeholder { width: 40px; height: 40px; border-radius: 50%; background-color: var(--tenant-secundario, #5C2D6D); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: var(--font-size-lg, 20px); }
+.card-title { font-size: var(--font-size-md, 17px); font-weight: var(--font-weight-bold, 600); margin: 0; }
 
-.data-table td {
-  font-size: var(--font-size-sm, 14px);
-  color: var(--tenant-texto);
-}
+.mt-auto { margin-top: auto; }
+.card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: var(--espacio-3, 12px); border-top: 1px dashed var(--color-borde, #e5e7eb); }
+.badges-container { display: flex; flex-wrap: wrap; gap: var(--espacio-2, 8px); flex: 1; align-items: center; }
+.badge { font-size: var(--font-size-xs, 11px); padding: 4px 8px; border-radius: 4px; font-weight: var(--font-weight-medium, 500); }
+.role-badge { background-color: rgba(92, 45, 109, 0.1); color: var(--tenant-secundario, #5C2D6D); border: 1px solid rgba(92, 45, 109, 0.2); }
 
-.td-bold {
-  font-weight: var(--font-weight-bold, 600);
-}
+.actions-container { display: flex; gap: var(--espacio-2, 8px); }
+.action-btn { background: var(--color-superficie, #ffffff); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--tenant-texto-muted, #6b7280); }
+.action-btn svg { width: 16px; height: 16px; }
+.edit-btn:hover { background-color: rgba(37, 99, 235, 0.1); border-color: var(--color-info, #2563eb); color: var(--color-info, #2563eb); }
+.delete-btn:hover { background-color: rgba(220, 38, 38, 0.1); border-color: var(--color-cancelar, #ef4444); color: var(--color-cancelar, #ef4444); }
 
-.role-badge {
-  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
-  color: var(--tenant-texto);
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: var(--font-size-xs, 11px);
-  font-weight: var(--font-weight-bold, 600);
-}
-
-.data-table tbody tr {
-  transition: background 0.15s;
-}
-
-.data-table tbody tr:hover {
-  background: color-mix(in srgb, var(--tenant-texto) 3%, transparent);
-}
-
-/* Acciones de tabla */
-.th-actions { text-align: right; }
-.td-actions { display: flex; gap: var(--espacio-2, 8px); justify-content: flex-end; }
-
-.action-btn {
-  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
-  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
-  border-radius: 8px;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.action-btn svg { width: 14px; height: 14px; }
-
-.btn-edit { color: color-mix(in srgb, var(--tenant-texto) 60%, transparent); }
-.btn-edit:hover {
-  background: color-mix(in srgb, var(--tenant-primario) 10%, transparent);
-  border-color: color-mix(in srgb, var(--tenant-primario) 25%, transparent);
-  color: var(--tenant-primario);
-}
-
-.btn-delete { color: color-mix(in srgb, var(--tenant-texto) 60%, transparent); }
-.btn-delete:hover {
-  background: color-mix(in srgb, var(--color-error, #dc2626) 10%, transparent);
-  border-color: color-mix(in srgb, var(--color-error, #dc2626) 25%, transparent);
-  color: var(--color-error, #dc2626);
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--espacio-3, 12px);
-  padding: var(--espacio-8, 32px) 0;
-  color: color-mix(in srgb, var(--tenant-texto) 40%, transparent);
-}
-.empty-state svg { width: 40px; height: 40px; }
-.empty-state p { margin: 0; font-size: var(--font-size-sm, 14px); }
-
-/* ── BUTTONS ── */
-.btn-primary  { display:flex; align-items:center; justify-content:center; gap:var(--espacio-2,8px); background:var(--color-exitoso,#16a34a); color:#fff; border:none; border-radius:10px; padding:var(--espacio-2,8px) var(--espacio-4,16px); font-size:var(--font-size-sm,13px); font-weight:var(--font-weight-bold,600); cursor:pointer; font-family:var(--tenant-fuente,sans-serif); transition:background .15s; }
-.btn-primary:hover { background: color-mix(in srgb, var(--color-exitoso, #16a34a) 85%, black 15%); }
-.btn-primary:disabled { opacity:.6; cursor:not-allowed; }
-
-.btn-secondary { display:flex; align-items:center; justify-content:center; gap:var(--espacio-2,8px); background:var(--tenant-primario); color:#fff; border:none; border-radius:10px; padding:var(--espacio-2,8px) var(--espacio-4,16px); font-size:var(--font-size-sm,13px); font-weight:var(--font-weight-bold,600); cursor:pointer; font-family:var(--tenant-fuente,sans-serif); transition:background .15s; }
-.btn-secondary:hover { background: color-mix(in srgb, var(--tenant-primario) 85%, black 15%); }
-.btn-secondary:disabled { opacity:.6; cursor:not-allowed; }
-
-.btn-danger { display:flex; align-items:center; justify-content:center; gap:var(--espacio-2,8px); background:var(--color-error,#dc2626); color:#fff; border:none; border-radius:10px; padding:var(--espacio-2,8px) var(--espacio-4,16px); font-size:var(--font-size-sm,13px); font-weight:var(--font-weight-bold,600); cursor:pointer; font-family:var(--tenant-fuente,sans-serif); transition:background .15s; }
-.btn-danger:hover { background: color-mix(in srgb, var(--color-error, #dc2626) 85%, black 15%); }
-.btn-danger:disabled { opacity:.6; cursor:not-allowed; }
-
-.btn-ghost { background:transparent; border:1px solid color-mix(in srgb, var(--tenant-texto) 15%, transparent); color:color-mix(in srgb, var(--tenant-texto) 60%, transparent); border-radius:10px; padding:var(--espacio-2,8px) var(--espacio-4,16px); font-size:var(--font-size-sm,13px); font-weight:var(--font-weight-medium,500); cursor:pointer; font-family:var(--tenant-fuente,sans-serif); transition:all .15s; }
-.btn-ghost:hover { background: color-mix(in srgb, var(--tenant-texto) 5%, transparent); color: var(--tenant-texto); }
+.loading-state, .empty-state { text-align: center; padding: var(--espacio-8, 32px); color: var(--tenant-texto-muted, #6b7280); background-color: var(--color-superficie, #ffffff); border: 1px dashed var(--color-borde, #e5e7eb); border-radius: 8px; }
 
 /* ── MODAL ── */
-.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:var(--espacio-6,24px); backdrop-filter:blur(3px); }
-.modal { background:var(--tenant-fondo); border:1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent); border-radius:20px; width:100%; max-width:440px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.3); }
-.modal-header { display:flex; align-items:center; justify-content:space-between; padding:var(--espacio-5,20px) var(--espacio-6,24px); border-bottom:1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent); }
-.modal-header h2 { margin:0; font-size:var(--font-size-md,17px); font-weight:var(--font-weight-bold,600); color:var(--tenant-texto); }
-.modal-close { background:none; border:none; cursor:pointer; color:color-mix(in srgb, var(--tenant-texto) 50%, transparent); display:flex; padding:4px; border-radius:6px; transition:background .15s; }
-.modal-close:hover { background:color-mix(in srgb, var(--tenant-texto) 10%, transparent); color:var(--tenant-texto); }
-.modal-close svg { width:18px; height:18px; }
-.modal-body { padding:var(--espacio-6,24px); display:flex; flex-direction:column; gap:var(--espacio-4,16px); }
-.modal-footer { display:flex; gap:var(--espacio-3,12px); justify-content:flex-end; padding:var(--espacio-4,16px) var(--espacio-6,24px); border-top:1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent); }
-
-.hint-msg { margin:0; font-size:var(--font-size-sm,13px); color:color-mix(in srgb, var(--tenant-texto) 70%, transparent); line-height:1.5; background:color-mix(in srgb, var(--tenant-texto) 4%, transparent); border-radius:8px; padding:var(--espacio-3,12px); }
-
-.field { display:flex; flex-direction:column; gap:var(--espacio-2,8px); }
-.field label { font-size:var(--font-size-xs,11px); text-transform:uppercase; letter-spacing:.08em; font-weight:var(--font-weight-medium,500); color:color-mix(in srgb, var(--tenant-texto) 60%, transparent); }
-.field input, .field select { background:color-mix(in srgb, var(--tenant-texto) 2%, transparent); border:1px solid color-mix(in srgb, var(--tenant-texto) 15%, transparent); border-radius:10px; padding:var(--espacio-3,12px) var(--espacio-4,16px); font-size:var(--font-size-base,15px); color:var(--tenant-texto); font-family:var(--tenant-fuente,sans-serif); outline:none; transition:border-color .2s; }
-.field input:focus, .field select:focus { border-color:var(--tenant-primario); }
-
-.error-msg { background:color-mix(in srgb, var(--color-error, #dc2626) 10%, transparent); border:1px solid color-mix(in srgb, var(--color-error, #dc2626) 20%, transparent); border-radius:10px; padding:var(--espacio-2,8px) var(--espacio-3,12px); font-size:var(--font-size-sm,13px); color:var(--color-error, #dc2626); }
-
-/* ── TOAST ── */
-.toast { position:fixed; bottom:var(--espacio-6,24px); left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:var(--espacio-3,12px); padding:var(--espacio-3,12px) var(--espacio-5,20px); border-radius:50px; font-size:var(--font-size-sm,13px); font-weight:var(--font-weight-medium,500); z-index:200; box-shadow:0 8px 30px rgba(0,0,0,.3); white-space:nowrap; }
-.toast svg { width:16px; height:16px; flex-shrink:0; }
-.toast--ok    { background:var(--color-exitoso,#16a34a); color:#fff; }
-.toast--error { background:var(--color-error,#dc2626);  color:#fff; }
-
-.spinner { width:16px; height:16px; border:2px solid rgba(255,255,255,.35); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; display:inline-block; }
-@keyframes spin { to { transform:rotate(360deg); } }
-
-.watermark { position:absolute; bottom:var(--espacio-6,24px); right:var(--espacio-8,32px); display:flex; align-items:center; gap:var(--espacio-2,8px); font-size:var(--font-size-xs,11px); color:color-mix(in srgb, var(--tenant-texto) 40%, transparent); pointer-events:none; }
-.watermark strong { color:var(--tenant-primario); font-weight:var(--font-weight-bold,600); }
-
-/* TRANSICIONES */
-.modal-enter-active, .modal-leave-active { transition:opacity .2s, transform .2s; }
-.modal-enter-from, .modal-leave-to { opacity:0; transform:scale(.97); }
-.toast-enter-active, .toast-leave-active { transition:opacity .25s, transform .25s; }
-.toast-enter-from { opacity:0; transform:translateX(-50%) translateY(12px); }
-.toast-leave-to   { opacity:0; transform:translateX(-50%) translateY(12px); }
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: var(--espacio-4, 16px); }
+.modal-content { background: var(--color-superficie, #ffffff); padding: var(--espacio-6, 24px); border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-height: 90vh; overflow-y: auto; }
+.modal-title { margin: 0 0 var(--espacio-4, 16px) 0; font-size: var(--font-size-lg, 20px); font-weight: 600; color: var(--tenant-texto, #111827); border-bottom: 1px solid var(--color-borde, #e5e7eb); padding-bottom: var(--espacio-3, 12px); }
+.modal-form { display: flex; flex-direction: column; gap: var(--espacio-4, 16px); }
+.form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.form-group label { font-size: var(--font-size-sm, 13px); font-weight: 500; color: var(--tenant-texto, #111827); }
+.form-input, .form-select { width: 100%; padding: 8px 12px; border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; font-size: var(--font-size-sm, 13px); outline: none; transition: border-color 0.2s; font-family: inherit; }
+.form-input:focus, .form-select:focus { border-color: var(--tenant-primario, #002D72); }
+.disabled-input { background-color: var(--color-superficie-alt, #f3f4f6); color: var(--tenant-texto-muted, #6b7280); cursor: not-allowed; }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--espacio-3, 12px); margin-top: var(--espacio-2, 8px); padding-top: var(--espacio-4, 16px); border-top: 1px solid var(--color-borde, #e5e7eb); }
 </style>
