@@ -4,6 +4,12 @@ import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
 
+// ── PERMISOS ─────────────────────────────────────────────────────────────────
+const canManage = computed(() => {
+  const rol = String(authStore.rol)
+  return rol === 'admin' || rol === 'gerente' || rol === '1' || rol === '2'
+})
+
 // ── ESTADOS GLOBALES Y PESTAÑAS ──────────────────────────────────────────────
 const tabs = [
   { id: 'productos', label: 'Productos' },
@@ -18,18 +24,16 @@ const ingredientes = ref<any[]>([])
 const menus = ref<any[]>([])
 const zonas = ref<any[]>([])
 const paquetes = ref<any[]>([])
-const categorias = ref<any[]>([]) // Necesario para el select al crear productos
+const categorias = ref<any[]>([]) 
 
 const isLoading = ref(false)
 const API_BASE = 'http://localhost:3000/api'
 
-// ── UTILIDAD PARA LIMPIAR TEXTOS ─────────────────────────────────────────────
 const cleanText = (str: string) => {
   if (!str) return ''
   return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
 }
 
-// ── ESTADOS DE FILTROS ───────────────────────────────────────────────────────
 const searchQuery = ref('')
 const statusFilter = ref('activos')
 const catFilter = ref('')
@@ -39,7 +43,7 @@ const tipoPaqueteFilter = ref('todos')
 const categoriasUnicas = computed(() => [...new Set(productos.value.map(p => p.categoria).filter(Boolean))])
 const zonasUnicas = computed(() => [...new Set(productos.value.map(p => p.zona).filter(Boolean))])
 
-// ── FETCH BASE MEJORADO (Soporta GET, POST, PUT, DELETE) ────────────────────
+// ── FETCH BASE ───────────────────────────────────────────────────────────────
 const fetchConToken = async (endpoint: string, method = 'GET', body: any = null) => {
   try {
     const options: RequestInit = {
@@ -77,7 +81,12 @@ const loadProductos = async () => {
 const loadIngredientes = async () => {
   isLoading.value = true
   const res = await fetchConToken('/productos/ingredientes/mostrar')
-  ingredientes.value = res.datos || []
+  // Normalizamos el estado de los ingredientes a nuestra bandera _activo para facilitar los filtros
+  ingredientes.value = (res.datos || []).map((i: any) => {
+    const estadoLimpio = cleanText(i.estado)
+    const isActivo = estadoLimpio === 'disponible' || estadoLimpio === 'activo' || i.activo === true
+    return { ...i, _activo: isActivo }
+  })
   isLoading.value = false
 }
 
@@ -102,6 +111,7 @@ const loadMenusYZonas = async () => {
 
 const loadPaquetes = async () => {
   isLoading.value = true
+  // Nota: Si el backend agrega el endpoint /mostrar-inactivos para paquetes, se carga aquí en paralelo.
   const res = await fetchConToken('/paquetes/vista-comprimida')
   paquetes.value = (res.datos || []).map((p: any) => ({ ...p, _activo: p.activo !== false })) 
   isLoading.value = false
@@ -112,28 +122,29 @@ const loadCategorias = async () => {
   categorias.value = res.datos || []
 }
 
-// ── CAMBIO DE PESTAÑA ────────────────────────────────────────────────────────
 const setTab = (tabId: string) => {
   activeTab.value = tabId
   searchQuery.value = ''
-  
   if (tabId === 'productos' && productos.value.length === 0) loadProductos()
   if (tabId === 'ingredientes' && ingredientes.value.length === 0) loadIngredientes()
   if (tabId === 'menus_zonas' && menus.value.length === 0) loadMenusYZonas()
   if (tabId === 'paquetes' && paquetes.value.length === 0) loadPaquetes()
 }
 
-// ── ESTADOS Y LÓGICA DEL MODAL DE CREACIÓN ───────────────────────────────────
+// ── LÓGICA DEL MODAL Y CRUD (CREAR/EDITAR) ───────────────────────────────────
 const showModal = ref(false)
 const modalType = ref('')
 const formData = ref<Record<string, any>>({})
 const isSubmitting = ref(false)
+const isEditing = ref(false)
+const editingId = ref<string | number | null>(null)
 
 const openAddModal = async (type: string) => {
   modalType.value = type
-  formData.value = {} // Limpiar el formulario
+  isEditing.value = false
+  editingId.value = null
+  formData.value = {} 
   
-  // Si vamos a crear un producto, nos aseguramos de tener zonas y categorías cargadas
   if (type === 'producto') {
     if (zonas.value.length === 0) await loadMenusYZonas()
     if (categorias.value.length === 0) await loadCategorias()
@@ -141,6 +152,141 @@ const openAddModal = async (type: string) => {
   showModal.value = true
 }
 
+const handleEdit = async (type: string, item: any) => {
+  modalType.value = type
+  isEditing.value = true
+  formData.value = {} 
+
+  // Función interna para limpiar textos y asegurar el match
+  const cleanStr = (s: string) => (s || '').toString().toLowerCase().trim()
+
+  if (type === 'producto') {
+    if (zonas.value.length === 0) await loadMenusYZonas()
+    if (categorias.value.length === 0) await loadCategorias()
+    
+    editingId.value = item.id_producto
+    formData.value.nombre = item.nombre_producto
+    formData.value.precio = item.precio_base
+    formData.value.descripcion = item.descripcion || ''
+    formData.value.url_imagen = item.url_imagen || ''
+    
+    // Búsqueda segura
+    const catEncontrada = categorias.value.find(c => cleanStr(c.nombre_cat || c.nombre) === cleanStr(item.categoria))
+    if (catEncontrada) formData.value.id_categoria = catEncontrada.id_categoria || catEncontrada.id
+    
+    const zonaEncontrada = zonas.value.find(z => cleanStr(z.nombre_zona || z.nombre) === cleanStr(item.zona))
+    if (zonaEncontrada) formData.value.id_zona = zonaEncontrada.id_zona || zonaEncontrada.id
+  }
+  else if (type === 'ingrediente') {
+    editingId.value = item.id
+    formData.value.nombre = item.ingrediente
+    formData.value.precio = item.precio
+  }
+  else if (type === 'zona') {
+    editingId.value = item.id_zona
+    formData.value.nombre = item.nombre_zona
+    formData.value.descripcion = item.descripcion_zona
+  }
+  else if (type === 'menu') {
+    editingId.value = item.id_menu
+    formData.value.nombre = item.nombre_menu
+    formData.value.descripcion = item.descripcion
+    formData.value.hora_inicio = item.hora_inicio
+    formData.value.hora_fin = item.hora_fin
+    formData.value.dias_semana = item.dias_semana
+    formData.value.fecha_inicio = item.fecha_inicio ? item.fecha_inicio.split('T')[0] : ''
+    formData.value.fecha_fin = item.fecha_fin ? item.fecha_fin.split('T')[0] : ''
+  }
+  else if (type === 'paquete') {
+    editingId.value = item.id
+    formData.value.nombre = item.paquete
+    formData.value.precio = item.precio
+    formData.value.descripcion = item.descripción
+  }
+
+  showModal.value = true
+}
+
+// ── LÓGICA DE DESACTIVAR Y REACTIVAR ─────────────────────────────────────────
+const handleDelete = async (type: string, id: number | string) => {
+  if (!confirm(`¿Estás seguro de desactivar este ${type}?`)) return
+
+  let endpoint = ''
+  let reloadFn: Function = () => {}
+
+  if (type === 'producto') { endpoint = `/productos/desactivar/${id}`; reloadFn = loadProductos }
+  else if (type === 'ingrediente') { endpoint = `/productos/ingrediente/desactivar/${id}`; reloadFn = loadIngredientes }
+  else if (type === 'zona') { endpoint = `/tienda/zonas/desactivar/${id}`; reloadFn = loadMenusYZonas }
+  else if (type === 'menu') { endpoint = `/menu/desactivar/${id}`; reloadFn = loadMenusYZonas }
+  else if (type === 'paquete') { endpoint = `/paquetes/desactivar/${id}`; reloadFn = loadPaquetes }
+
+  const res = await fetchConToken(endpoint, 'DELETE')
+  if (res.status === 'ok') reloadFn()
+  else alert(`Error: ${res.mensaje || 'No se pudo desactivar'}`)
+}
+
+const handleReactivate = async (type: string, item: any) => {
+  if (!confirm(`¿Estás seguro de volver a activar este ${type}?`)) return
+
+  let endpoint = ''
+  let payload: any = { activo: true }
+  let reloadFn: Function = () => {}
+
+  if (type === 'producto') {
+    if (zonas.value.length === 0) await loadMenusYZonas()
+    if (categorias.value.length === 0) await loadCategorias()
+
+    const cleanStr = (s: string) => (s || '').toString().toLowerCase().trim()
+    
+    const catEncontrada = categorias.value.find(c => cleanStr(c.nombre_cat || c.nombre) === cleanStr(item.categoria))
+    const zonaEncontrada = zonas.value.find(z => cleanStr(z.nombre_zona || z.nombre) === cleanStr(item.zona))
+
+    // Si la zona o categoría se borró de la BD, le abrimos el modal para que elija unas nuevas
+    if (!catEncontrada || !zonaEncontrada) {
+      alert('Las zonas o categorías originales cambiaron. Por favor, reasígnalas en el formulario para reactivarlo.')
+      handleEdit('producto', item)
+      return
+    }
+
+    endpoint = `/productos/modificar/${item.id_producto}`
+    payload = {
+      nombre: item.nombre_producto,
+      precio: item.precio_base,
+      id_categoria: catEncontrada.id_categoria || catEncontrada.id,
+      id_zona: zonaEncontrada.id_zona || zonaEncontrada.id,
+      disponibilidad: true // Opcional, si tu BD requiere este campo también
+    }
+    reloadFn = loadProductos
+  } 
+  else if (type === 'ingrediente') {
+    endpoint = `/productos/ingrediente/actualizar/${item.id}`
+    payload = { activo: true, estado: 'Disponible' } 
+    reloadFn = loadIngredientes
+  } 
+  else if (type === 'zona') {
+    endpoint = `/tienda/zonas/modificar/${item.id_zona}`
+    payload = { activo: true }
+    reloadFn = loadMenusYZonas
+  } 
+  else if (type === 'menu') {
+    endpoint = `/menu/modificar/${item.id_menu}`
+    payload = { activo: true }
+    reloadFn = loadMenusYZonas
+  } 
+  else if (type === 'paquete') {
+    endpoint = `/paquetes/actualizar/${item.id}`
+    payload = { activo: true }
+    reloadFn = loadPaquetes
+  }
+
+  const res = await fetchConToken(endpoint, 'PUT', payload)
+  if (res.status === 'ok' || res.status === 200) {
+    reloadFn()
+  } else {
+    alert(`Error al reactivar: ${res.mensaje || 'Revisa los datos'}`)
+  }
+}
+// ── ENVÍO DE FORMULARIOS ─────────────────────────────────────────────────────
 const closeModal = () => {
   showModal.value = false
   formData.value = {}
@@ -149,40 +295,44 @@ const closeModal = () => {
 const handleSubmit = async () => {
   isSubmitting.value = true
   let endpoint = ''
+  let method = isEditing.value ? 'PUT' : 'POST'
   let reloadFn: Function = () => {}
 
-  // Mapeo de rutas según la documentación de tu backend
+  if (modalType.value === 'ingrediente' && !isEditing.value) {
+    formData.value.tipo = 'General' 
+  }
+
   switch (modalType.value) {
     case 'producto':
-      endpoint = '/productos/agregar'
+      endpoint = isEditing.value ? `/productos/modificar/${editingId.value}` : '/productos/agregar'
       reloadFn = loadProductos
       break
     case 'ingrediente':
-      endpoint = '/productos/ingrediente/agregar'
+      endpoint = isEditing.value ? `/productos/ingrediente/actualizar/${editingId.value}` : '/productos/ingrediente/agregar'
       reloadFn = loadIngredientes
       break
     case 'zona':
-      endpoint = '/tienda/zonas/agregar'
+      endpoint = isEditing.value ? `/tienda/zonas/modificar/${editingId.value}` : '/tienda/zonas/agregar'
       reloadFn = loadMenusYZonas
       break
     case 'menu':
-      endpoint = '/menu/agregar'
+      endpoint = isEditing.value ? `/menu/modificar/${editingId.value}` : '/menu/agregar'
       reloadFn = loadMenusYZonas
       break
     case 'paquete':
-      endpoint = '/paquetes/agregar'
+      endpoint = isEditing.value ? `/paquetes/actualizar/${editingId.value}` : '/paquetes/agregar'
       reloadFn = loadPaquetes
       break
   }
 
-  const res = await fetchConToken(endpoint, 'POST', formData.value)
+  const res = await fetchConToken(endpoint, method, formData.value)
   isSubmitting.value = false
 
   if (res.status === 'ok' || res.status === 201) {
     closeModal()
     reloadFn()
   } else {
-    alert(`Error: ${res.mensaje || 'No se pudo guardar'}`)
+    alert(`Error: ${res.mensaje || 'Revisa los datos ingresados'}`)
   }
 }
 
@@ -202,8 +352,7 @@ const filteredProductos = computed(() => {
 const filteredIngredientes = computed(() => {
   return ingredientes.value.filter(i => {
     const matchSearch = cleanText(i.ingrediente).includes(term.value)
-    const isActive = cleanText(i.estado) === 'disponible' || cleanText(i.estado) === 'activo' || i.activo === true
-    const matchStatus = statusFilter.value === 'todos' ? true : (statusFilter.value === 'activos' ? isActive : !isActive)
+    const matchStatus = statusFilter.value === 'todos' ? true : (statusFilter.value === 'activos' ? i._activo : !i._activo)
     return matchSearch && matchStatus
   })
 })
@@ -232,9 +381,6 @@ const filteredPaquetes = computed(() => {
     return matchSearch && matchStatus && matchType
   })
 })
-
-const handleEdit = (type: string, item: any) => { console.log(`Editar ${type}:`, item) }
-const handleDelete = (type: string, id: number | string) => { console.log(`Desactivar ${type}:`, id) }
 
 onMounted(() => {
   loadProductos()
@@ -287,7 +433,7 @@ onMounted(() => {
         </template>
       </div>
 
-      <div class="actions-group">
+      <div v-if="canManage" class="actions-group">
         <button v-if="activeTab === 'productos'" @click="openAddModal('producto')" class="btn-primary">+ Nuevo Producto</button>
         <button v-if="activeTab === 'ingredientes'" @click="openAddModal('ingrediente')" class="btn-primary">+ Nuevo Ingrediente</button>
         <div v-if="activeTab === 'menus_zonas'" style="display:flex; gap:8px;">
@@ -314,17 +460,26 @@ onMounted(() => {
               <span class="badge">{{ item.zona }}</span>
               <span v-if="!item._activo" class="badge danger">Inactivo</span>
             </div>
-            <div class="actions-container">
-              <button @click="handleEdit('producto', item)" class="action-btn edit-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-              <button @click="handleDelete('producto', item.id_producto)" class="action-btn delete-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+            
+            <div v-if="canManage" class="actions-container">
+              <template v-if="item._activo">
+                <button @click="handleEdit('producto', item)" class="action-btn edit-btn" title="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
+                <button @click="handleDelete('producto', item.id_producto)" class="action-btn delete-btn" title="Desactivar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+              </template>
+              <template v-else>
+                <button @click="handleReactivate('producto', item)" class="action-btn reactivate-btn" title="Reactivar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+                </button>
+              </template>
             </div>
+
           </div>
         </div>
       </div>
 
       <div v-show="activeTab === 'ingredientes' && !isLoading" class="grid-container">
         <div v-if="filteredIngredientes.length === 0" class="empty-state">No se encontraron ingredientes.</div>
-        <div v-for="item in filteredIngredientes" :key="item.id" :class="['card', { 'inactive-card': item.estado !== 'Activo' && item.estado !== 'Disponible' }]">
+        <div v-for="item in filteredIngredientes" :key="item.id" :class="['card', { 'inactive-card': !item._activo }]">
           <div class="card-header">
             <h3 class="card-title">{{ item.ingrediente }}</h3>
             <span class="card-price">+${{ item.precio }}</span>
@@ -332,12 +487,21 @@ onMounted(() => {
           <div class="card-footer mt-auto">
             <div class="badges-container">
               <span class="badge">{{ item.tipo }}</span>
-              <span :class="['badge', (item.estado === 'Activo' || item.estado === 'Disponible') ? 'success' : 'danger']">{{ item.estado }}</span>
+              <span :class="['badge', item._activo ? 'success' : 'danger']">{{ item._activo ? 'Activo' : 'Inactivo' }}</span>
             </div>
-            <div class="actions-container">
-              <button @click="handleEdit('ingrediente', item)" class="action-btn edit-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-              <button @click="handleDelete('ingrediente', item.id)" class="action-btn delete-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+            
+            <div v-if="canManage" class="actions-container">
+              <template v-if="item._activo">
+                <button @click="handleEdit('ingrediente', item)" class="action-btn edit-btn" title="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
+                <button @click="handleDelete('ingrediente', item.id)" class="action-btn delete-btn" title="Desactivar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+              </template>
+              <template v-else>
+                <button @click="handleReactivate('ingrediente', item)" class="action-btn reactivate-btn" title="Reactivar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+                </button>
+              </template>
             </div>
+
           </div>
         </div>
       </div>
@@ -352,10 +516,19 @@ onMounted(() => {
               <p class="card-desc">{{ zona.descripcion_zona }}</p>
               <div class="card-footer mt-auto justify-end">
                 <div class="badges-container"><span v-if="!zona._activo" class="badge danger">Inactiva</span></div>
-                <div class="actions-container">
-                  <button @click="handleEdit('zona', zona)" class="action-btn edit-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-                  <button @click="handleDelete('zona', zona.id_zona)" class="action-btn delete-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+                
+                <div v-if="canManage" class="actions-container">
+                  <template v-if="zona._activo">
+                    <button @click="handleEdit('zona', zona)" class="action-btn edit-btn" title="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
+                    <button @click="handleDelete('zona', zona.id_zona)" class="action-btn delete-btn" title="Desactivar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+                  </template>
+                  <template v-else>
+                    <button @click="handleReactivate('zona', zona)" class="action-btn reactivate-btn" title="Reactivar">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+                    </button>
+                  </template>
                 </div>
+
               </div>
             </div>
           </div>
@@ -374,10 +547,19 @@ onMounted(() => {
                   <span class="badge">{{ menu.dias_semana }}</span>
                   <span v-if="!menu._activo" class="badge danger">Inactivo</span>
                 </div>
-                <div class="actions-container">
-                  <button @click="handleEdit('menu', menu)" class="action-btn edit-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-                  <button @click="handleDelete('menu', menu.id_menu)" class="action-btn delete-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+                
+                <div v-if="canManage" class="actions-container">
+                  <template v-if="menu._activo">
+                    <button @click="handleEdit('menu', menu)" class="action-btn edit-btn" title="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
+                    <button @click="handleDelete('menu', menu.id_menu)" class="action-btn delete-btn" title="Desactivar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+                  </template>
+                  <template v-else>
+                    <button @click="handleReactivate('menu', menu)" class="action-btn reactivate-btn" title="Reactivar">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+                    </button>
+                  </template>
                 </div>
+
               </div>
             </div>
           </div>
@@ -398,10 +580,19 @@ onMounted(() => {
               <span v-if="paquete.dias_disponibles" class="badge warning">{{ paquete.dias_disponibles }}</span>
               <span v-if="!paquete._activo" class="badge danger">Inactivo</span>
             </div>
-            <div class="actions-container">
-              <button @click="handleEdit('paquete', paquete)" class="action-btn edit-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-              <button @click="handleDelete('paquete', paquete.id)" class="action-btn delete-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+            
+            <div v-if="canManage" class="actions-container">
+              <template v-if="paquete._activo">
+                <button @click="handleEdit('paquete', paquete)" class="action-btn edit-btn" title="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
+                <button @click="handleDelete('paquete', paquete.id)" class="action-btn delete-btn" title="Desactivar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
+              </template>
+              <template v-else>
+                <button @click="handleReactivate('paquete', paquete)" class="action-btn reactivate-btn" title="Reactivar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+                </button>
+              </template>
             </div>
+
           </div>
         </div>
       </div>
@@ -409,7 +600,7 @@ onMounted(() => {
 
     <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
-        <h2 class="modal-title">Agregar Nuevo(a) <span style="text-transform: capitalize">{{ modalType }}</span></h2>
+        <h2 class="modal-title">{{ isEditing ? 'Editar' : 'Agregar Nuevo(a)' }} <span style="text-transform: capitalize">{{ modalType }}</span></h2>
         
         <form @submit.prevent="handleSubmit" class="modal-form">
           <div class="form-group">
@@ -425,10 +616,6 @@ onMounted(() => {
           </template>
 
           <template v-if="modalType === 'ingrediente'">
-            <div class="form-group">
-              <label>Tipo (Ej. opcional, modificador):</label>
-              <input v-model="formData.tipo" type="text" required class="form-input" />
-            </div>
             <div class="form-group">
               <label>Precio Adicional:</label>
               <input v-model.number="formData.precio" type="number" step="0.1" required class="form-input" />
@@ -456,7 +643,7 @@ onMounted(() => {
                 <label>Zona de Preparación:</label>
                 <select v-model="formData.id_zona" required class="form-select">
                   <option disabled value="">Selecciona...</option>
-                  <option v-for="z in zonas" :key="z.id_zona" :value="z.id_zona">{{ z.nombre_zona || z.nombre }}</option>
+                  <option v-for="z in zonas.filter((z: any) => z._activo)" :key="z.id_zona" :value="z.id_zona">{{ z.nombre_zona || z.nombre }}</option>
                 </select>
               </div>
             </div>
@@ -526,10 +713,6 @@ onMounted(() => {
               <label>Días disponibles (Opcional):</label>
               <input v-model="formData.dias_disponibles" type="text" class="form-input" />
             </div>
-            <div class="form-group">
-              <label>URL Imagen (Opcional):</label>
-              <input v-model="formData.url_imagen" type="text" class="form-input" />
-            </div>
           </template>
 
           <div class="modal-actions">
@@ -592,10 +775,13 @@ onMounted(() => {
 .badge.success { background-color: rgba(22, 163, 74, 0.1); color: var(--color-exitoso, #16a34a); }
 .badge.danger { background-color: rgba(220, 38, 38, 0.1); color: var(--color-cancelar, #ef4444); border: 1px solid rgba(220,38,38,0.2); }
 .actions-container { display: flex; gap: var(--espacio-2, 8px); }
-.action-btn { background: var(--color-superficie, #ffffff); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--tenant-texto-muted, #6b7280); }
+.action-btn { background: var(--color-superficie, #ffffff); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--tenant-texto-muted, #6b7280); transition: all 0.2s ease;}
 .action-btn svg { width: 16px; height: 16px; }
+
+/* Efectos hover de los botones */
 .edit-btn:hover { background-color: rgba(37, 99, 235, 0.1); border-color: var(--color-info, #2563eb); color: var(--color-info, #2563eb); }
 .delete-btn:hover { background-color: rgba(220, 38, 38, 0.1); border-color: var(--color-cancelar, #ef4444); color: var(--color-cancelar, #ef4444); }
+.reactivate-btn:hover { background-color: rgba(22, 163, 74, 0.1); border-color: var(--color-exitoso, #16a34a); color: var(--color-exitoso, #16a34a); }
 
 .sub-section { display: flex; flex-direction: column; gap: var(--espacio-4, 16px); }
 .section-title { font-size: var(--font-size-lg, 20px); font-weight: var(--font-weight-bold, 600); margin: 0; }
