@@ -239,4 +239,103 @@ router.delete('/paquetes/desvincular', verificarToken, async (req, res) => {
     }
 });
 
+//////////////////////////////////////////////////////////////////
+// PROMOCION CLIENTE
+//////////////////////////////////////////////////////////////////
+
+router.post('/clientes/vincular', verificarToken, async (req, res) => {
+    try {
+        const { id_promocion, id_cliente } = req.body;
+
+        // 1. Validación de campos obligatorios
+        if (!id_promocion || !id_cliente) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_promocion e id_cliente son obligatorios."
+            });
+        }
+
+        const query = 'SELECT fn_alta_promocion_cliente($1, $2) AS resultado';
+        const values = [id_promocion, id_cliente];
+
+        const result = await db.query(query, values);
+        const mensaje = result.rows[0].resultado;
+        if (mensaje === 'El cliente ya tiene esta promoción') {
+            return res.status(409).json({ // 409: Conflict
+                status: "error",
+                mensaje
+            });
+        }
+
+        res.status(201).json({
+            status: "ok",
+            mensaje,
+            datos: { id_promocion, id_cliente }
+        });
+
+    } catch (err) {
+        console.error("Error al asignar promoción al cliente:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar vincular al cliente con la promoción"
+        });
+    }
+});
+
+router.delete('/clientes/desvincular', verificarToken, async (req, res) => {
+    try {
+        const { id_promocion, id_cliente } = req.body;
+
+        if (!id_promocion || !id_cliente) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "Se requiere id_promocion e id_cliente para procesar la baja."
+            });
+        }
+        const query = 'SELECT fn_baja_promocion_cliente($1, $2) AS resultado';
+        const result = await db.query(query, [id_promocion, id_cliente]);
+        
+        const mensajeRecibido = result.rows[0].resultado;
+        res.json({
+            status: "ok",
+            mensaje: mensajeRecibido,
+            datos_eliminados: { id_promocion, id_cliente }
+        });
+
+    } catch (err) {
+        console.error("Error al eliminar promoción del cliente:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar quitar la promoción al cliente"
+        });
+    }
+});
+
+router.get('/clientes/mostrar',verificarToken, async (req, res) => {
+    try {
+        const query = 'Select * from v_promocion_clientes';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay columnas en la tabla promociones paquetes",
+                datos: []
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: "Lista de promociones vinculadas a paquetes",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener las promociones vinculadas a los paquetes:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener la informacion" 
+        });
+    }
+}); 
+
 module.exports = router; 
