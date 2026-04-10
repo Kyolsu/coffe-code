@@ -416,18 +416,18 @@ router.get('/productos/mostrar',verificarToken, async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(200).json({
                 status: "ok",
-                mensaje: "No hay columnas en la tabla promociones paquetes",
+                mensaje: "No hay columnas en la tabla promociones productos",
                 datos: []
             });
         }
         res.json({
             status: "ok",
-            mensaje: "Lista de promociones vinculadas a paquetes",
+            mensaje: "Lista de promociones vinculadas a productos",
             datos: result.rows
         });
 
     } catch (err) {
-        console.error("Error al obtener las promociones vinculadas a los paquetes:", err.message);
+        console.error("Error al obtener las promociones vinculadas a los productos:", err.message);
         res.status(500).json({ 
             status: "error", 
             mensaje: "Error interno al obtener la informacion" 
