@@ -167,7 +167,7 @@ const handleEdit = async (type: string, item: any) => {
     editingId.value = item.id_producto
     formData.value.nombre = item.nombre_producto
     formData.value.precio = item.precio_base
-    formData.value.descripcion = item.descripcion || ''
+    formData.value.descripcion = item.descripcion_pro || item.descripcion || ''
     formData.value.url_imagen = item.url_imagen || ''
     
     // Búsqueda segura
@@ -201,7 +201,7 @@ const handleEdit = async (type: string, item: any) => {
     editingId.value = item.id
     formData.value.nombre = item.paquete
     formData.value.precio = item.precio
-    formData.value.descripcion = item.descripción
+    formData.value.descripcion = item.descripcion
   }
 
   showModal.value = true
@@ -341,6 +341,7 @@ const term = computed(() => cleanText(searchQuery.value))
 
 const filteredProductos = computed(() => {
   return productos.value.filter(p => {
+    const desc = p.descripcion_pro || p.descripcion || ''
     const matchSearch = cleanText(p.nombre_producto).includes(term.value) || cleanText(p.descripcion).includes(term.value)
     const matchStatus = statusFilter.value === 'todos' ? true : (statusFilter.value === 'activos' ? p._activo : !p._activo)
     const matchCat = catFilter.value === '' ? true : p.categoria === catFilter.value
