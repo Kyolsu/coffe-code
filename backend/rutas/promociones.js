@@ -246,8 +246,6 @@ router.delete('/paquetes/desvincular', verificarToken, async (req, res) => {
 router.post('/clientes/vincular', verificarToken, async (req, res) => {
     try {
         const { id_promocion, id_cliente } = req.body;
-
-        // 1. Validación de campos obligatorios
         if (!id_promocion || !id_cliente) {
             return res.status(400).json({
                 status: "error",
@@ -261,7 +259,7 @@ router.post('/clientes/vincular', verificarToken, async (req, res) => {
         const result = await db.query(query, values);
         const mensaje = result.rows[0].resultado;
         if (mensaje === 'El cliente ya tiene esta promoción') {
-            return res.status(409).json({ // 409: Conflict
+            return res.status(409).json({ 
                 status: "error",
                 mensaje
             });
@@ -314,6 +312,105 @@ router.delete('/clientes/desvincular', verificarToken, async (req, res) => {
 router.get('/clientes/mostrar',verificarToken, async (req, res) => {
     try {
         const query = 'Select * from v_promocion_clientes';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay columnas en la tabla promociones paquetes",
+                datos: []
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: "Lista de promociones vinculadas a paquetes",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener las promociones vinculadas a los paquetes:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener la informacion" 
+        });
+    }
+}); 
+
+//////////////////////////////////////////////////////////////////
+// PROMOCION PRODUCTOS
+//////////////////////////////////////////////////////////////////
+
+router.post('/productos/vincular', verificarToken, async (req, res) => {
+    try {
+        const { id_promocion, id_producto } = req.body;
+
+        if (!id_promocion || !id_producto) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_promocion e id_producto son obligatorios."
+            });
+        }
+
+        const query = 'SELECT fn_alta_promocion_producto($1, $2) AS resultado';
+        const result = await db.query(query, [id_promocion, id_producto]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'El producto ya está en esta promoción') {
+            return res.status(409).json({
+                status: "error",
+                mensaje
+            });
+        }
+
+        res.status(201).json({
+            status: "ok",
+            mensaje,
+            datos: { id_promocion, id_producto }
+        });
+
+    } catch (err) {
+        console.error("Error al asignar producto a promoción:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la vinculación del producto"
+        });
+    }
+});
+
+router.delete('/productos/desvincular', verificarToken, async (req, res) => {
+    try {
+        const { id_promocion, id_producto } = req.body;
+
+        if (!id_promocion || !id_producto) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "Se requiere id_promocion e id_producto para la baja."
+            });
+        }
+
+        const query = 'SELECT fn_baja_promocion_producto($1, $2) AS resultado';
+        const result = await db.query(query, [id_promocion, id_producto]);
+        const mensaje = result.rows[0].resultado;
+
+        res.json({
+            status: "ok",
+            mensaje,
+            datos_eliminados: { id_promocion, id_producto }
+        });
+
+    } catch (err) {
+        console.error("Error al desvincular producto de promoción:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar eliminar la relación"
+        });
+    }
+});
+
+
+router.get('/productos/mostrar',verificarToken, async (req, res) => {
+    try {
+        const query = 'Select * from v_promocion_productos';
         
         const result = await db.query(query);
         if (result.rows.length === 0) {
