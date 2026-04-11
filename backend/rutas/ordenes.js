@@ -248,9 +248,86 @@ router.get('/pendientes-pago',verificarToken, async (req, res) => {
     }
 }); 
 
-router.get('/completas', async (req, res) => {
+
+//////////////////////////////////////////////////////////
+// Orden pagos
+//////////////////////////////////////////////////////////
+
+
+router.post('/pagos/agregar', verificarToken, async (req, res) => {
     try {
-        const query = 'Select * from v_orden_completa';
+        const { id_orden, metodo, monto, referencia } = req.body;
+        const id_usuario = req.usuario.id_usuario; 
+
+        if (!id_orden || !metodo || !monto) {
+            return res.status(400).json({ status: "error", mensaje: "Faltan datos obligatorios" });
+        }
+
+        const query = 'SELECT fn_alta_pago($1, $2, $3, $4, $5) AS resultado';
+        const result = await db.query(query, [id_orden, metodo, monto, referencia || null, id_usuario]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'Monto inválido') {
+            return res.status(400).json({ status: "error", mensaje });
+        }
+
+        res.status(201).json({ status: "ok", mensaje });
+    } catch (err) {
+        res.status(500).json({ status: "error", mensaje: err.message });
+    }
+
+});
+
+router.delete('/pagos/cancelar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const query = 'SELECT fn_baja_pago($1) AS resultado';
+        const result = await db.query(query, [id]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'Pago no existe') {
+            return res.status(404).json({ status: "error", mensaje });
+        }
+
+        res.json({ status: "ok", mensaje });
+    } catch (err) {
+        res.status(500).json({ status: "error", mensaje: err.message });
+    }
+});
+
+
+router.put('/pagos/modificar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { metodo, monto, referencia, activo } = req.body;
+        const id_usuario = req.usuario.id_usuario;
+
+        const query = 'SELECT fn_actualizar_pago($1, $2, $3, $4, $5, $6) AS resultado';
+        const values = [
+            id, 
+            metodo || null, 
+            monto !== undefined ? monto : null, 
+            referencia || null, 
+            id_usuario, 
+            activo !== undefined ? activo : null
+        ];
+
+        const result = await db.query(query, values);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'Pago no existe') return res.status(404).json({ status: "error", mensaje });
+        if (mensaje === 'Monto inválido') return res.status(400).json({ status: "error", mensaje });
+
+        res.json({ status: "ok", mensaje });
+    } catch (err) {
+        res.status(500).json({ status: "error", mensaje: err.message });
+    }
+});
+
+
+router.get('/pagos/mostrar', async (req, res) => {
+    try {
+        const query = 'Select * from v_orden_pagos';
         
         const result = await db.query(query);
         if (result.rows.length === 0) {
@@ -275,9 +352,9 @@ router.get('/completas', async (req, res) => {
     }
 }); 
 
+//////////////////////////////////////////////////////////
+// Orden pagos
+//////////////////////////////////////////////////////////
 
-//////////////////////////////////////////////////////////
-// 
-//////////////////////////////////////////////////////////
 
 module.exports = router; 
