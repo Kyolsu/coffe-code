@@ -325,7 +325,7 @@ router.put('/pagos/modificar/:id', verificarToken, async (req, res) => {
 });
 
 
-router.get('/pagos/mostrar', async (req, res) => {
+router.get('/pagos/mostrar', verificarToken,async (req, res) => {
     try {
         const query = 'Select * from v_orden_pagos';
         
@@ -333,13 +333,13 @@ router.get('/pagos/mostrar', async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(200).json({
                 status: "ok",
-                mensaje: "No hay información en la tabla de ordenes",
+                mensaje: "No hay información en la tabla de ordenes pagos",
                 datos: []
             });
         }
         res.json({
             status: "ok",
-            mensaje: "Lista de ordenes",
+            mensaje: "Lista de ordenes de pago",
             datos: result.rows
         });
 
@@ -353,8 +353,434 @@ router.get('/pagos/mostrar', async (req, res) => {
 }); 
 
 //////////////////////////////////////////////////////////
-// Orden pagos
+// Orden Paquetes Selección
 //////////////////////////////////////////////////////////
 
+router.post('/paquete-seleccion/agregar', verificarToken, async (req, res) => {
+    try {
+        const { id_detalle, id_grupo, id_producto, cantidad } = req.body;
+
+        if (!id_detalle || !id_grupo || !id_producto) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_detalle, id_grupo e id_producto son obligatorios."
+            });
+        }
+
+        const query = 'SELECT fn_alta_ops($1, $2, $3, $4) AS id_seleccion';
+        const values = [id_detalle, id_grupo, id_producto, cantidad || 1];
+
+        const result = await db.query(query, values);
+        
+        res.status(201).json({
+            status: "ok",
+            mensaje: "Selección de paquete registrada",
+            id_seleccion: result.rows[0].id_seleccion
+        });
+
+    } catch (err) {
+        console.error("Error en alta OPS:", err.message);
+        if (err.message.includes('Cantidad inválida')) {
+            return res.status(400).json({ status: "error", mensaje: err.message });
+        }
+        res.status(500).json({ status: "error", mensaje: "Error interno al procesar la selección" });
+    }
+});
+
+
+router.delete('/paquete-seleccion/cancelar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const query = 'SELECT fn_baja_ops($1) AS resultado';
+        const result = await db.query(query, [id]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'No existe la selección') {
+            return res.status(404).json({ status: "error", mensaje });
+        }
+
+        res.json({ status: "ok", mensaje });
+    } catch (err) {
+        res.status(500).json({ status: "error", mensaje: err.message });
+    }
+});
+
+router.put('/paquete-seleccion/modificar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { cantidad } = req.body;
+
+        const query = 'SELECT fn_actualizar_ops($1, $2) AS resultado';
+        const result = await db.query(query, [id, cantidad || null]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'No existe la selección') return res.status(404).json({ status: "error", mensaje });
+        if (mensaje === 'Cantidad inválida') return res.status(400).json({ status: "error", mensaje });
+
+        res.json({ status: "ok", mensaje });
+    } catch (err) {
+        res.status(500).json({ status: "error", mensaje: err.message });
+    }
+});
+
+router.get('/paquete-seleccion/mostrar',verificarToken, async (req, res) => {
+    try {
+        const query = 'Select * from v_orden_paquete_selecciones';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay información en la tabla de ordenes paquete seleccion",
+                datos: []
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: "Lista de ordenes en seleccion de paquete",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener las ordenes de paquete seleccion:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener la informacion" 
+        });
+    }
+}); 
+
+//////////////////////////////////////////////////////////
+// Orden Paquetes Selección
+//////////////////////////////////////////////////////////
+
+
+router.post('/detalles/agregar', verificarToken, async (req, res) => {
+    try {
+        const { 
+            id_orden, 
+            cantidad, 
+            precio_unitario, 
+            subtotal, 
+            id_producto, 
+            id_paquete, 
+            descuento, 
+            id_promocion, 
+            id_zona, 
+            notas 
+        } = req.body;
+
+        // 1. Validaciones básicas antes de ir a la base de datos
+        if (!id_orden || !cantidad || !precio_unitario || subtotal === undefined) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "Faltan campos obligatorios (orden, cantidad, precio o subtotal)."
+            });
+        }
+
+        // 2. Llamada a la función de PostgreSQL
+        const query = `
+            SELECT fn_alta_orden_detalle($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) AS id_detalle
+        `;
+        
+        const values = [
+            id_orden,
+            cantidad,
+            precio_unitario,
+            subtotal,
+            id_producto || null,
+            id_paquete || null,
+            descuento || 0,
+            id_promocion || null,
+            id_zona || null,
+            notas || null
+        ];
+
+        const result = await db.query(query, values);
+        
+        res.status(201).json({
+            status: "ok",
+            mensaje: "Ítem agregado a la orden",
+            id_orden_detalle: result.rows[0].id_detalle
+        });
+
+    } catch (err) {
+        console.error("Error al insertar detalle de orden:", err.message);
+
+        // Capturamos los RAISE EXCEPTION específicos de tu función
+        if (err.message.includes('Cantidad inválida') || 
+            err.message.includes('Montos inválidos') || 
+            err.message.includes('Debe especificar producto o paquete')) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: err.message
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar el detalle de la orden"
+        });
+    }
+});
+
+router.delete('/detalles/cancelar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const query = 'SELECT fn_baja_orden_detalle($1) AS resultado';
+        const result = await db.query(query, [id]);
+        
+        const mensajeRecibido = result.rows[0].resultado;
+
+        if (mensajeRecibido === 'No existe el detalle') {
+            return res.status(404).json({
+                status: "error",
+                mensaje: mensajeRecibido
+            });
+        }
+
+        res.json({
+            status: "ok",
+            mensaje: mensajeRecibido,
+            id_detalle_eliminado: id
+        });
+
+    } catch (err) {
+        console.error("Error al eliminar detalle de orden:", err.message);
+        if (err.message.includes('foreign key constraint')) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "No se puede eliminar el detalle porque tiene selecciones de paquete vinculadas. Elimina primero las selecciones (OPS)."
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar eliminar el ítem"
+        });
+    }
+});
+
+router.put('/detalles/modificar/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { 
+            cantidad, 
+            precio, 
+            descuento, 
+            subtotal, 
+            estado, 
+            notas 
+        } = req.body;
+
+        const query = `
+            SELECT fn_actualizar_orden_detalle($1, $2, $3, $4, $5, $6, $7) AS resultado
+        `;
+        
+        const values = [
+            id,
+            cantidad !== undefined ? cantidad : null,
+            precio !== undefined ? precio : null,
+            descuento !== undefined ? descuento : null,
+            subtotal !== undefined ? subtotal : null,
+            estado || null, 
+            notas || null
+        ];
+
+        const result = await db.query(query, values);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'No existe el detalle') {
+            return res.status(404).json({
+                status: "error",
+                mensaje
+            });
+        }
+
+        res.json({
+            status: "ok",
+            mensaje,
+            id_actualizado: id
+        });
+
+    } catch (err) {
+        console.error("Error al actualizar detalle de orden:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la actualización del detalle"
+        });
+    }
+});
+
+router.get('/detalles/mostrar',verificarToken, async (req, res) => {
+    try {
+        const query = 'Select * from v_orden_detalles';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay información en la tabla de ordenes detalles",
+                datos: []
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: "Lista de ordenes  detalles",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener las ordenes de paquete seleccion:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener la informacion" 
+        });
+    }
+}); 
+
+//////////////////////////////////////////////////////////
+// Orden Detalles modificador
+//////////////////////////////////////////////////////////
+
+router.post('/detalles-modificadores/', verificarToken, async (req, res) => {
+    try {
+        const { id_detalle, id_ingrediente, accion, precio } = req.body;
+
+        if (!id_detalle || !id_ingrediente) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_detalle e id_ingrediente son obligatorios."
+            });
+        }
+        const query = `
+            SELECT fn_alta_orden_modifica($1, $2, $3, $4) AS id_modificador
+        `;
+        
+        const values = [
+            id_detalle,
+            id_ingrediente,
+            accion || 'agregar', 
+            precio !== undefined ? precio : 0
+        ];
+
+        const result = await db.query(query, values);
+        
+        res.status(201).json({
+            status: "ok",
+            mensaje: "Modificador aplicado al producto",
+            id_detalle_modificador: result.rows[0].id_modificador
+        });
+
+    } catch (err) {
+        console.error("Error al aplicar modificador:", err.message);
+
+        if (err.message.includes('Precio inválido')) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "El precio del modificador no puede ser negativo."
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar el modificador"
+        });
+    }
+});
+
+router.delete('/detalles-modificadores/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const query = 'SELECT fn_baja_orden_modificador($1) AS resultado';
+        const result = await db.query(query, [id]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'No existe el modificador') {
+            return res.status(404).json({
+                status: "error",
+                mensaje
+            });
+        }
+
+        res.json({
+            status: "ok",
+            mensaje,
+            id_eliminado: id
+        });
+
+    } catch (err) {
+        console.error("Error al eliminar modificador:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar eliminar el modificador"
+        });
+    }
+});
+
+router.put('/detalles-modificadores/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { accion, precio } = req.body;
+
+        const query = 'SELECT fn_actualizar_orden_modificador($1, $2, $3) AS resultado';
+        const values = [
+            id,
+            accion || null, 
+            precio !== undefined ? precio : null
+        ];
+
+        const result = await db.query(query, values);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'No existe el modificador') {
+            return res.status(404).json({
+                status: "error",
+                mensaje
+            });
+        }
+
+        res.json({
+            status: "ok",
+            mensaje,
+            datos_actualizados: { id, accion, precio }
+        });
+
+    } catch (err) {
+        console.error("Error al actualizar modificador:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al procesar la actualización del modificador"
+        });
+    }
+});
+
+router.get('/detalles-modificadores/mostrar',verificarToken, async (req, res) => {
+    try {
+        const query = 'Select * from v_orden_modificadores';
+        
+        const result = await db.query(query);
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                status: "ok",
+                mensaje: "No hay información en la tabla de modificadores detalles",
+                datos: []
+            });
+        }
+        res.json({
+            status: "ok",
+            mensaje: "Lista de modificadores detalles",
+            datos: result.rows
+        });
+
+    } catch (err) {
+        console.error("Error al obtener los detales de modificadores:", err.message);
+        res.status(500).json({ 
+            status: "error", 
+            mensaje: "Error interno al obtener la informacion de los modificadores" 
+        });
+    }
+}); 
 
 module.exports = router; 
