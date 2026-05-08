@@ -21,6 +21,12 @@ const API_BASE = 'http://localhost:3000/api'
 const searchQuery = ref('')
 const statusFilter = ref('activos')
 
+// ── ESTADOS PARA PROMOCIONES ─────────────────────────────────────────────────
+const promocionesCatalogo = ref<any[]>([]) // Todas las promos existentes
+const promocionesActualesCliente = ref<any[]>([]) // Promos que ya tiene el cliente
+const idPromocionParaVincular = ref('') // Selección del dropdown
+const isLoadingPromos = ref(false)
+
 // ── UTILIDAD PARA LIMPIAR TEXTOS ─────────────────────────────────────────────
 const cleanText = (str: string) => {
   if (!str) return ''
@@ -48,21 +54,74 @@ const fetchConToken = async (endpoint: string, method = 'GET', body: any = null)
   }
 }
 
-// ── CARGAS DE DATOS ──────────────────────────────────────────────────────────
+// ── CARGAS DE DATOS (CLIENTES) ───────────────────────────────────────────────
 const loadClientes = async () => {
   isLoading.value = true
-  // Hacemos peticiones simultáneas a los activos e inactivos
   const [activosRes, inactivosRes] = await Promise.all([
     fetchConToken('/clientes/mostrar-activos'),
     fetchConToken('/clientes/mostrar-inactivos')
   ])
   
-  // Normalizamos la data agregando un flag interno _activo para facilitar el filtrado visual
   const clientesActivos = (activosRes.datos || []).map((c: any) => ({ ...c, _activo: true }))
   const clientesInactivos = (inactivosRes.datos || []).map((c: any) => ({ ...c, _activo: false }))
   
   clientes.value = [...clientesActivos, ...clientesInactivos]
   isLoading.value = false
+}
+
+// ── MÉTODOS DE PROMOCIONES ───────────────────────────────────────────────────
+const loadPromocionesCatalogo = async () => {
+  const res = await fetchConToken('/promociones/mostrar')
+  if (res.status === 'ok') {
+    promocionesCatalogo.value = res.datos || []
+  }
+}
+
+const loadPromocionesDelCliente = async (id_cliente: number) => {
+  isLoadingPromos.value = true
+  const res = await fetchConToken('/promociones/clientes/mostrar')
+  if (res.status === 'ok') {
+    // Filtramos para obtener solo las promos del cliente actual que estén activas
+    promocionesActualesCliente.value = (res.datos || []).filter(
+      (p: any) => p.id_cliente === id_cliente && p.promocion_activa === true
+    )
+  }
+  isLoadingPromos.value = false
+}
+
+const handleVincularPromocion = async () => {
+  if (!idPromocionParaVincular.value || !formData.value.id_cliente) return
+
+  const payload = {
+    id_cliente: formData.value.id_cliente,
+    id_promocion: Number(idPromocionParaVincular.value)
+  }
+
+  const res = await fetchConToken('/promociones/clientes/vincular', 'POST', payload)
+  
+  if (res.status === 'ok' || res.status === 201) {
+    idPromocionParaVincular.value = ''
+    await loadPromocionesDelCliente(formData.value.id_cliente)
+  } else {
+    alert(res.mensaje || 'La promoción ya está vinculada o no se pudo asignar.')
+  }
+}
+
+const handleDesvincularPromocion = async (id_promocion: number) => {
+  if (!confirm('¿Quitar esta promoción al cliente?')) return
+
+  const payload = {
+    id_cliente: formData.value.id_cliente,
+    id_promocion: id_promocion
+  }
+
+  const res = await fetchConToken('/promociones/clientes/desvincular', 'DELETE', payload)
+  
+  if (res.status === 'ok') {
+    await loadPromocionesDelCliente(formData.value.id_cliente)
+  } else {
+    alert('No se pudo desvincular la promoción.')
+  }
 }
 
 // ── ESTADOS Y LÓGICA DEL MODAL ───────────────────────────────────────────────
@@ -71,20 +130,24 @@ const modalType = ref<'crear' | 'editar'>('crear')
 const formData = ref<Record<string, any>>({})
 const isSubmitting = ref(false)
 
-const openModal = (type: 'crear' | 'editar', cliente: any = null) => {
+const openModal = async (type: 'crear' | 'editar', cliente: any = null) => {
   if (!canEdit.value) return 
 
   modalType.value = type
   if (type === 'crear') {
     formData.value = { nombre: '', email: '', telefono: '' }
+    promocionesActualesCliente.value = []
   } else if (type === 'editar') {
     formData.value = { 
       id_cliente: cliente.id_cliente,
       nombre: cliente.nombre, 
       email: cliente.email || '', 
       telefono: cliente.telefono || '',
-      activo: cliente.activo ?? cliente._activo // Capturamos su estado actual
+      activo: cliente.activo ?? cliente._activo 
     }
+    // Cargamos catálogos y las promos que ya tiene este cliente
+    await loadPromocionesCatalogo()
+    await loadPromocionesDelCliente(cliente.id_cliente)
   }
   showModal.value = true
 }
@@ -92,6 +155,8 @@ const openModal = (type: 'crear' | 'editar', cliente: any = null) => {
 const closeModal = () => {
   showModal.value = false
   formData.value = {}
+  promocionesActualesCliente.value = []
+  idPromocionParaVincular.value = ''
 }
 
 const handleSubmit = async () => {
@@ -106,7 +171,7 @@ const handleSubmit = async () => {
   } else if (modalType.value === 'editar') {
     endpoint = `/clientes/modificar/${payload.id_cliente}`
     method = 'PUT'
-    delete payload.id_cliente // El ID ya va en la URL, no lo mandamos en el body
+    delete payload.id_cliente 
   }
 
   const res = await fetchConToken(endpoint, method, payload)
@@ -125,7 +190,6 @@ const term = computed(() => cleanText(searchQuery.value))
 
 const filteredClientes = computed(() => {
   return clientes.value.filter(c => {
-    // Busca por nombre, email o teléfono
     const matchSearch = cleanText(c.nombre).includes(term.value) || 
                         cleanText(c.email).includes(term.value) || 
                         cleanText(c.telefono).includes(term.value)
@@ -244,12 +308,41 @@ onMounted(() => {
           </div>
 
           <template v-if="modalType === 'editar'">
-            <hr style="border-top: 1px dashed var(--color-borde); width: 100%; margin: 12px 0;" />
+            
+            <div class="promociones-section">
+              <label class="section-subtitle">Promociones Vinculadas</label>
+              
+              <div class="promos-list" v-if="promocionesActualesCliente.length > 0">
+                <div v-for="promo in promocionesActualesCliente" :key="promo.id_promocion" class="promo-tag">
+                  <span>{{ promo.nombre_promocion }}</span>
+                  <button type="button" @click="handleDesvincularPromocion(promo.id_promocion)" class="remove-promo-btn" title="Quitar promoción">
+                    &times;
+                  </button>
+                </div>
+              </div>
+              <p v-else-if="!isLoadingPromos" class="empty-promos-text">El cliente no tiene promociones asignadas actualmente.</p>
+              <p v-else class="empty-promos-text">Cargando promociones...</p>
+
+              <div class="add-promo-row">
+                <select v-model="idPromocionParaVincular" class="form-select-small">
+                  <option value="" disabled>Selecciona una promoción para agregar...</option>
+                  <option v-for="p in promocionesCatalogo" :key="p.id_promocion" :value="p.id_promocion">
+                    {{ p.nombre_promocion }}
+                  </option>
+                </select>
+                <button type="button" @click="handleVincularPromocion" class="btn-add-inline" :disabled="!idPromocionParaVincular">
+                  Asignar
+                </button>
+              </div>
+            </div>
+
+            <hr style="border-top: 1px dashed var(--color-borde); width: 100%; margin: 16px 0;" />
+            
             <div class="switch-container">
               <label class="switch-label">
                 <div>
                   <span style="display: block; font-weight: 500;">Estatus del Cliente</span>
-                  <span style="font-size: var(--font-size-xs); color: var(--tenant-texto-muted);">Los clientes dados de baja no acumulan beneficios.</span>
+                  <span style="font-size: var(--font-size-xs); color: var(--tenant-texto-muted);">Los clientes dados de baja no acumulan beneficios ni promociones.</span>
                 </div>
               </label>
               <label class="toggle-switch">
@@ -260,7 +353,7 @@ onMounted(() => {
           </template>
 
           <div class="modal-actions">
-            <button type="button" @click="closeModal" class="btn-cancel" :disabled="isSubmitting">Cancelar</button>
+            <button type="button" @click="closeModal" class="btn-cancel" :disabled="isSubmitting">Cerrar</button>
             <button type="submit" class="btn-primary" :disabled="isSubmitting">
               {{ isSubmitting ? 'Guardando...' : 'Guardar Información' }}
             </button>
@@ -308,7 +401,6 @@ onMounted(() => {
 .client-info { display: flex; align-items: center; gap: var(--espacio-3, 12px); width: 100%; }
 .avatar-placeholder { flex-shrink: 0; width: 42px; height: 42px; border-radius: 8px; background-color: var(--tenant-secundario, #5C2D6D); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: var(--font-size-lg, 20px); }
 
-/* Manejo de nombres largos */
 .client-name-container { overflow: hidden; width: 100%; }
 .card-title { font-size: var(--font-size-md, 17px); font-weight: var(--font-weight-bold, 600); margin: 0; line-height: 1.2; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
@@ -333,7 +425,7 @@ onMounted(() => {
 
 /* ── MODAL ── */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: var(--espacio-4, 16px); }
-.modal-content { background: var(--color-superficie, #ffffff); padding: var(--espacio-6, 24px); border-radius: 12px; width: 100%; max-width: 450px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-height: 90vh; overflow-y: auto; }
+.modal-content { background: var(--color-superficie, #ffffff); padding: var(--espacio-6, 24px); border-radius: 12px; width: 100%; max-width: 480px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-height: 90vh; overflow-y: auto; }
 .modal-title { margin: 0 0 var(--espacio-4, 16px) 0; font-size: var(--font-size-lg, 20px); font-weight: 600; color: var(--tenant-texto, #111827); border-bottom: 1px solid var(--color-borde, #e5e7eb); padding-bottom: var(--espacio-3, 12px); }
 .modal-form { display: flex; flex-direction: column; gap: var(--espacio-4, 16px); }
 .form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; }
@@ -354,6 +446,19 @@ input:focus + .slider { box-shadow: 0 0 1px var(--color-exitoso, #16a34a); }
 input:checked + .slider:before { transform: translateX(20px); }
 .slider.round { border-radius: 24px; }
 .slider.round:before { border-radius: 50%; }
+
+/* ── ESTILOS DE PROMOCIONES EN MODAL ── */
+.promociones-section { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--color-borde); }
+.section-subtitle { display: block; font-size: var(--font-size-sm, 13px); font-weight: 600; color: var(--tenant-texto, #111827); margin-bottom: 12px; }
+.promos-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.promo-tag { display: flex; align-items: center; gap: 6px; background-color: rgba(37, 99, 235, 0.1); color: var(--color-info, #2563eb); border: 1px solid rgba(37, 99, 235, 0.2); padding: 4px 10px; border-radius: 16px; font-size: var(--font-size-xs, 11px); font-weight: 500; }
+.remove-promo-btn { background: none; border: none; color: var(--color-info, #2563eb); font-size: 16px; cursor: pointer; line-height: 1; padding: 0; transition: color 0.2s; }
+.remove-promo-btn:hover { color: var(--color-cancelar, #ef4444); }
+.empty-promos-text { font-size: var(--font-size-xs, 11px); color: var(--tenant-texto-muted); margin-bottom: 16px; font-style: italic; }
+.add-promo-row { display: flex; gap: 8px; }
+.form-select-small { flex: 1; padding: 8px 10px; border: 1px solid var(--color-borde); border-radius: 6px; font-size: var(--font-size-sm, 13px); outline: none; font-family: inherit; color: var(--tenant-texto); }
+.btn-add-inline { background-color: var(--tenant-secundario, #5C2D6D); color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: var(--font-size-sm, 13px); font-weight: 500; cursor: pointer; transition: opacity 0.2s; }
+.btn-add-inline:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--espacio-3, 12px); margin-top: var(--espacio-2, 8px); padding-top: var(--espacio-4, 16px); border-top: 1px solid var(--color-borde, #e5e7eb); }
 </style>

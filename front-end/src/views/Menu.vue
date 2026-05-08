@@ -29,6 +29,18 @@ const categorias = ref<any[]>([])
 const isLoading = ref(false)
 const API_BASE = 'http://localhost:3000/api'
 
+// ── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
+const toasts = ref<{ id: number; message: string; type: 'success' | 'error' | 'warning' }[]>([])
+let toastId = 0
+
+const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
+  const id = ++toastId
+  toasts.value.push({ id, message, type })
+  setTimeout(() => {
+    toasts.value = toasts.value.filter(t => t.id !== id)
+  }, 3000)
+}
+
 const cleanText = (str: string) => {
   if (!str) return ''
   return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -122,6 +134,14 @@ const loadCategorias = async () => {
   categorias.value = res.datos || []
 }
 
+const ingredientesDisponibles = ref<any[]>([])
+const selectedIngredients = ref<number[]>([])
+
+const loadIngredientesDisponibles = async () => {
+  const res = await fetchConToken('/productos/ingredientes/mostrar')
+  ingredientesDisponibles.value = (res.datos || []).filter((i: any) => i.activo !== false)
+}
+
 const setTab = (tabId: string) => {
   activeTab.value = tabId
   searchQuery.value = ''
@@ -139,15 +159,30 @@ const isSubmitting = ref(false)
 const isEditing = ref(false)
 const editingId = ref<string | number | null>(null)
 
+// Días de la semana para menús
+const diasSemana = [
+  { valor: 'Lunes', label: 'Lun' },
+  { valor: 'Martes', label: 'Mar' },
+  { valor: 'Miércoles', label: 'Mié' },
+  { valor: 'Jueves', label: 'Jue' },
+  { valor: 'Viernes', label: 'Vie' },
+  { valor: 'Sábado', label: 'Sáb' },
+  { valor: 'Domingo', label: 'Dom' }
+]
+const selectedDias = ref<string[]>([])
+
 const openAddModal = async (type: string) => {
   modalType.value = type
   isEditing.value = false
   editingId.value = null
-  formData.value = {} 
+  formData.value = {}
+  selectedIngredients.value = []
+  if (type === 'menu') selectedDias.value = []
   
   if (type === 'producto') {
     if (zonas.value.length === 0) await loadMenusYZonas()
     if (categorias.value.length === 0) await loadCategorias()
+    await loadIngredientesDisponibles()
   }
   showModal.value = true
 }
@@ -155,7 +190,8 @@ const openAddModal = async (type: string) => {
 const handleEdit = async (type: string, item: any) => {
   modalType.value = type
   isEditing.value = true
-  formData.value = {} 
+  formData.value = {}
+  selectedIngredients.value = []
 
   // Función interna para limpiar textos y asegurar el match
   const cleanStr = (s: string) => (s || '').toString().toLowerCase().trim()
@@ -163,6 +199,7 @@ const handleEdit = async (type: string, item: any) => {
   if (type === 'producto') {
     if (zonas.value.length === 0) await loadMenusYZonas()
     if (categorias.value.length === 0) await loadCategorias()
+    await loadIngredientesDisponibles()
     
     editingId.value = item.id_producto
     formData.value.nombre = item.nombre_producto
@@ -176,6 +213,16 @@ const handleEdit = async (type: string, item: any) => {
     
     const zonaEncontrada = zonas.value.find(z => cleanStr(z.nombre_zona || z.nombre) === cleanStr(item.zona))
     if (zonaEncontrada) formData.value.id_zona = zonaEncontrada.id_zona || zonaEncontrada.id
+
+    // Cargar ingredientes vinculados al producto
+    try {
+      const resIng = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${item.id_producto}`)
+      if (resIng.datos && resIng.datos.length > 0) {
+        selectedIngredients.value = resIng.datos.map((pi: any) => pi.id_ingrediente)
+      }
+    } catch (e) {
+      console.error('Error al cargar ingredientes del producto', e)
+    }
   }
   else if (type === 'ingrediente') {
     editingId.value = item.id
@@ -193,9 +240,15 @@ const handleEdit = async (type: string, item: any) => {
     formData.value.descripcion = item.descripcion
     formData.value.hora_inicio = item.hora_inicio
     formData.value.hora_fin = item.hora_fin
-    formData.value.dias_semana = item.dias_semana
     formData.value.fecha_inicio = item.fecha_inicio ? item.fecha_inicio.split('T')[0] : ''
     formData.value.fecha_fin = item.fecha_fin ? item.fecha_fin.split('T')[0] : ''
+    // Parsear días de semana
+    if (item.dias_semana) {
+      const dias = item.dias_semana.split(',').map((d: string) => d.trim())
+      selectedDias.value = dias.filter((d: string) => diasSemana.some(ds => ds.valor === d))
+    } else {
+      selectedDias.value = []
+    }
   }
   else if (type === 'paquete') {
     editingId.value = item.id
@@ -221,8 +274,12 @@ const handleDelete = async (type: string, id: number | string) => {
   else if (type === 'paquete') { endpoint = `/paquetes/desactivar/${id}`; reloadFn = loadPaquetes }
 
   const res = await fetchConToken(endpoint, 'DELETE')
-  if (res.status === 'ok') reloadFn()
-  else alert(`Error: ${res.mensaje || 'No se pudo desactivar'}`)
+  if (res.status === 'ok') {
+    showToast(`${type} desactivado correctamente`, 'success')
+    reloadFn()
+  } else {
+    showToast(res.mensaje || 'Error al desactivar', 'error')
+  }
 }
 
 const handleReactivate = async (type: string, item: any) => {
@@ -281,9 +338,10 @@ const handleReactivate = async (type: string, item: any) => {
 
   const res = await fetchConToken(endpoint, 'PUT', payload)
   if (res.status === 'ok' || res.status === 200) {
+    showToast(`${type} reactivado correctamente`, 'success')
     reloadFn()
   } else {
-    alert(`Error al reactivar: ${res.mensaje || 'Revisa los datos'}`)
+    showToast(res.mensaje || 'Error al reactivar', 'error')
   }
 }
 // ── ENVÍO DE FORMULARIOS ─────────────────────────────────────────────────────
@@ -318,6 +376,7 @@ const handleSubmit = async () => {
     case 'menu':
       endpoint = isEditing.value ? `/menu/modificar/${editingId.value}` : '/menu/agregar'
       reloadFn = loadMenusYZonas
+      formData.value.dias_semana = selectedDias.value.join(', ')
       break
     case 'paquete':
       endpoint = isEditing.value ? `/paquetes/actualizar/${editingId.value}` : '/paquetes/agregar'
@@ -329,10 +388,11 @@ const handleSubmit = async () => {
   isSubmitting.value = false
 
   if (res.status === 'ok' || res.status === 201) {
+    showToast('Guardado correctamente', 'success')
     closeModal()
     reloadFn()
   } else {
-    alert(`Error: ${res.mensaje || 'Revisa los datos ingresados'}`)
+    showToast(res.mensaje || 'Error al guardar', 'error')
   }
 }
 
@@ -599,6 +659,16 @@ onMounted(() => {
       </div>
     </main>
 
+    <!-- Toast Notifications -->
+    <div class="toast-container">
+      <div v-for="toast in toasts" :key="toast.id" :class="['toast', toast.type]">
+        <span v-if="toast.type === 'success'">&#10003;</span>
+        <span v-else-if="toast.type === 'error'">&#10007;</span>
+        <span v-else>&#9888;</span>
+        {{ toast.message }}
+      </div>
+    </div>
+
     <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
         <h2 class="modal-title">{{ isEditing ? 'Editar' : 'Agregar Nuevo(a)' }} <span style="text-transform: capitalize">{{ modalType }}</span></h2>
@@ -650,7 +720,20 @@ onMounted(() => {
             </div>
             <div class="form-group">
               <label>URL Imagen (Opcional):</label>
-              <input v-model="formData.url_imagen" type="text" class="form-input" />
+              <input v-model="formData.url_imagen" type="text" class="form-input" placeholder="https://..." />
+              <div v-if="formData.url_imagen" class="img-preview">
+                <img :src="formData.url_imagen" alt="Preview" @error="formData.url_imagen = ''" />
+              </div>
+            </div>
+            <div v-if="ingredientesDisponibles.length > 0" class="form-group">
+              <label>Ingredientes/Modificadores:</label>
+              <div class="ingredients-grid">
+                <label v-for="ing in ingredientesDisponibles" :key="ing.id" class="ingredient-checkbox">
+                  <input type="checkbox" :value="ing.id" v-model="selectedIngredients" />
+                  <span class="ing-nombre">{{ ing.ingrediente }}</span>
+                  <span v-if="ing.precio > 0" class="ing-precio">+${{ ing.precio }}</span>
+                </label>
+              </div>
             </div>
           </template>
 
@@ -670,8 +753,13 @@ onMounted(() => {
               </div>
             </div>
             <div class="form-group">
-              <label>Días de la semana (Ej. Lunes-Viernes):</label>
-              <input v-model="formData.dias_semana" type="text" required class="form-input" />
+              <label>Días de la semana:</label>
+              <div class="dias-semana-container">
+                <label v-for="dia in diasSemana" :key="dia.valor" class="dia-checkbox">
+                  <input type="checkbox" :value="dia.valor" v-model="selectedDias" />
+                  <span>{{ dia.label }}</span>
+                </label>
+              </div>
             </div>
             <div class="form-row">
               <div class="form-group">
@@ -801,4 +889,29 @@ onMounted(() => {
 .form-input:focus, .form-select:focus { border-color: var(--tenant-primario, #002D72); }
 textarea.form-input { resize: vertical; min-height: 80px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--espacio-3, 12px); margin-top: var(--espacio-4, 16px); padding-top: var(--espacio-4, 16px); border-top: 1px solid var(--color-borde, #e5e7eb); }
+
+/* ── DÍAS DE LA SEMANA CHECKBOXES ── */
+.dias-semana-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.dia-checkbox { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; }
+.dia-checkbox input { accent-color: var(--tenant-primario, #002D72); }
+
+/* ── INGREDIENTES CHECKBOXES ── */
+.ingredients-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.ingredient-checkbox { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; cursor: pointer; font-size: 13px; transition: background 0.2s; }
+.ingredient-checkbox:hover { background: var(--color-superficie-alt, #f3f4f6); }
+.ingredient-checkbox input { accent-color: var(--tenant-primario, #002D72); }
+.ing-nombre { font-weight: 500; }
+.ing-precio { color: var(--color-exitoso, #16a34a); font-size: 12px; }
+
+/* ── IMAGEN PREVIEW ── */
+.img-preview { margin-top: 8px; }
+.img-preview img { max-width: 150px; max-height: 100px; border-radius: 6px; border: 1px solid var(--color-borde, #e5e7eb); }
+
+/* ── TOAST NOTIFICATIONS ── */
+.toast-container { position: fixed; top: 20px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 8px; }
+.toast { padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: slideIn 0.3s ease; display: flex; align-items: center; gap: 8px; }
+.toast.success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+.toast.error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.toast.warning { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 </style>
