@@ -441,4 +441,91 @@ router.put('/beneficio-clientes/modificar/:id', verificarToken, async (req, res)
         });
     }
 });
+
+
+//////////////////////////////////////////////
+/// USO BENEFICIOS
+//////////////////////////////////////////////
+
+//alta
+
+router.post('/beneficios/uso', verificarToken, async (req, res) => {
+    try {
+        const { id_cliente_beneficio, id_orden, cantidad } = req.body;
+
+        if (!id_cliente_beneficio || !id_orden) {
+            return res.status(400).json({
+                status: "error", 
+                mensaje: "id_cliente_beneficio e id_orden son obligatorios."
+            });
+        }
+
+        const query = 'SELECT fn_alta_uso_beneficio($1, $2, $3) AS resultado';
+        const result = await db.query(query, [id_cliente_beneficio, id_orden, cantidad || 1]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'Cantidad inválida') {
+            return res.status(400).json({ status: "error", mensaje });
+        }
+
+        res.status(201).json({ status: "ok", mensaje });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ status: "error", mensaje: "Error al registrar el uso del beneficio" });
+    }
+});
+
+//Actualizar
+router.put('/beneficios/uso/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { cantidad, activo } = req.body;
+
+        const query = 'SELECT fn_actualizar_uso_beneficio($1, $2, $3) AS resultado';
+        const result = await db.query(query, [id, cantidad !== undefined ? cantidad : null, activo !== undefined ? activo : null]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'Registro no existe') return res.status(404).json({ status: "error", mensaje });
+        if (mensaje === 'Cantidad inválida') return res.status(400).json({ status: "error", mensaje });
+
+        res.json({ status: "ok", mensaje });
+    } catch (err) {
+        res.status(500).json({ status: "error", mensaje: "Error al actualizar el registro" });
+    }
+});
+
+/////////baja
+
+router.delete('/beneficios/uso/:id', verificarToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const query = 'SELECT fn_baja_uso_beneficio($1) AS resultado';
+        const result = await db.query(query, [id]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'Registro no existe') {
+            return res.status(404).json({ status: "error", mensaje });
+        }
+
+        res.json({ status: "ok", mensaje });
+    } catch (err) {
+        res.status(500).json({ status: "error", mensaje: "Error al desactivar el uso del beneficio" });
+    }
+});
+
+//get 
+router.get('/beneficios/uso', verificarToken, async (req, res) => {
+    try {
+        const result = await db.query('SELECT * FROM v_uso_beneficios');
+        res.json({
+            status: "ok",
+            datos: result.rows
+        });
+    } catch (err) {
+        res.status(500).json({ status: "error", mensaje: "Error al obtener historial" });
+    }
+});
+
+
 module.exports = router; 
