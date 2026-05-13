@@ -451,7 +451,7 @@ router.get('/paquete-seleccion/mostrar',verificarToken, async (req, res) => {
 }); 
 
 //////////////////////////////////////////////////////////
-// Orden Paquetes Selección
+// Orden Detalles
 //////////////////////////////////////////////////////////
 
 
@@ -782,5 +782,6 @@ router.get('/detalles-modificadores/mostrar',verificarToken, async (req, res) =>
         });
     }
 }); 
+
 
 module.exports = router; 
