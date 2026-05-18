@@ -125,7 +125,7 @@ const showClientModal = ref(false)
 const clientSearchQuery = ref('')
 
 // Promociones por item
-const itemPromociones = ref<Record<number, { nombre: string; tipo: string; valor: number }[]>>({})
+const itemPromociones = ref<Record<number, { id_promocion: number; nombre: string; tipo: string; valor: number }[]>>({})
 
 // RFID
 const rfidListening = ref(false)
@@ -650,7 +650,7 @@ const applyAutomaticPromotions = () => {
   console.log('🏷️ Debug promo - dayOfWeek:', dayOfWeek, 'Promociones activas:', activePromociones.value.map(p => ({ nombre: p.nombre, dias: p.dias, tipo: p.tipo })))
   
   const todayPromociones: { id_promocion: number; nombre: string; tipo: string; valor: number }[] = []
-  const newItemPromociones: Record<number, { nombre: string; tipo: string; valor: number }[]> = {}
+  const newItemPromociones: Record<number, { id_promocion: number; nombre: string; tipo: string; valor: number }[]> = {}
   
   // Productos normales (no paquetes) en el carrito
   const productosNormales = cart.value.filter(item => !item.isPackage)
@@ -696,7 +696,7 @@ const applyAutomaticPromotions = () => {
         4: 'jueves', 5: 'viernes', 6: 'sabado'
       }
       const diaActual = diasMap[dayOfWeek]
-      if (!diasPermitidos.includes(diaActual)) continue
+      if (!diasPermitidos.includes(diaActual as string)) continue
     }
     
     // Para 2x1 (bogo) solo aplicar si hay al menos 2 bebidas
@@ -721,7 +721,7 @@ const applyAutomaticPromotions = () => {
       if (promo.tipo === 'bogo') {
         const index = productosNormales.findIndex(p => p.cartId === item.cartId)
         if (index === 0) { // Solo al primer item
-          newItemPromociones[item.cartId].push({
+          newItemPromociones[item.cartId]?.push({
             id_promocion: promo.id_promocion,
             nombre: promo.nombre,
             tipo: promo.tipo,
@@ -730,7 +730,7 @@ const applyAutomaticPromotions = () => {
           promoAplicada = true
         }
       } else {
-        newItemPromociones[item.cartId].push({
+        newItemPromociones[item.cartId]?.push({
           id_promocion: promo.id_promocion,
           nombre: promo.nombre,
           tipo: promo.tipo,
@@ -807,7 +807,7 @@ const processPay = async () => {
     const payload = {
       id_cliente: selectedClient.value?.id_cliente || null,
       metodo_pago: selectedPayment.value,
-      subtotal: subtotal.value,
+      subtotal: subtotalConIva.value,
       descuento: totalDescuentos.value,
       impuestos: iva.value,
       total: total.value,
