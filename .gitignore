@@ -41,3 +41,5 @@ __screenshots__/
 #backend
 backend/node_modules/
 backend/.env
+
+dc

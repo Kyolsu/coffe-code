@@ -150,10 +150,10 @@ const pathArea = computed(() => {
     return `${x},${y}`
   })
 
-  const primerPunto = puntos[0].replace(',', ',')
-  const ultimoPunto = puntos[puntos.length - 1].replace(',', ',')
+  const primerPunto = puntos[0]?.replace(',', ',')
+  const ultimoPunto = puntos[puntos.length - 1]?.replace(',', ',')
 
-  return `M${primerPunto} L${puntos.join(' L')} L${ultimoPunto} L${ultimoPunto.split(',')[0]},${height} L${primerPunto.split(',')[0]},${height} Z`
+  return `M${primerPunto} L${puntos.join(' L')} L${ultimoPunto} L${ultimoPunto?.split(',')[0]},${height} L${primerPunto?.split(',')[0]},${height} Z`
 })
 
 onMounted(() => {
