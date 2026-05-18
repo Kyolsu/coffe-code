@@ -2,11 +2,12 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import API_URL from '../config/api'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
-const API_BASE = 'http://localhost:3000/api'
+const API_BASE = `${API_URL}/api`
 
 // ── TIPOS ──────────────────────────────────────────────
 interface OrderItem {

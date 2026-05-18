@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import API_URL from '../config/api'
 
 const authStore = useAuthStore()
 
@@ -29,7 +30,7 @@ const promociones = ref<any[]>([])
 const categorias = ref<any[]>([]) 
 
 const isLoading = ref(false)
-const API_BASE = 'http://localhost:3000/api'
+const API_BASE = `${API_URL}/api`
 
 // ── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
 const toasts = ref<{ id: number; message: string; type: 'success' | 'error' | 'warning' }[]>([])

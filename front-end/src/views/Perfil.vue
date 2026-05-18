@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { default as API_URL } from '../config/api'
 
 const authStore = useAuthStore()
-const API_URL   = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
 const ROL_LABEL: Record<number, string> = {
   1: 'Administrador',

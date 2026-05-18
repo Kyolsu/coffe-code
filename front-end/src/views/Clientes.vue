@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import API_URL from '../config/api'
 
 const authStore = useAuthStore()
 
@@ -15,7 +16,7 @@ const canEdit = computed(() => {
 // ── ESTADOS GLOBALES ─────────────────────────────────────────────────────────
 const clientes = ref<any[]>([])
 const isLoading = ref(false)
-const API_BASE = 'http://localhost:3000/api'
+const API_BASE = `${API_URL}/api`
 
 // ── ESTADOS DE FILTROS ───────────────────────────────────────────────────────
 const searchQuery = ref('')
