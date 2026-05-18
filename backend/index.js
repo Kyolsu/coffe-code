@@ -13,12 +13,9 @@ const paquetesPromociones=require('./rutas/promociones')
 const ordenesRutas=require('./rutas/ordenes')
 const inventarioRutas=require('./rutas/inventario')
 app.use(express.json());
-app.use(cors());
-app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: ['http://localhost:5173', 'https://coffe-code-psi.vercel.app']
 }));
-app.use(express.json());
 //RUTAS DE ENDPOINTS
 app.use('/api/usuarios', usuariosRutas);
 app.use('/api/clientes',clientesRutas);
