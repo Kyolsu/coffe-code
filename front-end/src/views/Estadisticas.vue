@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import API_URL from '../config/api'
 import Sidebar from '../components/Sidebar.vue'
 
-const API_BASE = 'http://localhost:3000/api'
+const API_BASE = `${API_URL}/api`
 const authStore = useAuthStore()
 
 // ── TIPOS ─────────────────────────────
