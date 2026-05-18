@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import Sidebar from '../components/Sidebar.vue'
 import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
@@ -107,8 +106,6 @@ onMounted(fetchPerfil)
 
 <template>
   <div class="perfil-layout">
-    <Sidebar />
-
     <main class="perfil-main">
 
       <!-- HEADER -->

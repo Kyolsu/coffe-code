@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
@@ -68,6 +68,11 @@ interface Promocion {
   valor: number
   es_temporal: boolean
   activo: boolean
+  solo_clientes?: boolean
+  hora_inicio?: string | null
+  hora_fin?: string | null
+  dias?: string | null
+  dias_aplicables?: string | string[] | null
 }
 
 interface Beneficio {
@@ -96,6 +101,7 @@ interface CartItem {
   packageId?: number
   packageSelections?: { id_grupo: number; id_producto: number; nombre: string }[]
   extraPrice?: number
+  categoria?: string
 }
 
 // ── ESTADO ─────────────────────────────────────────────
@@ -117,6 +123,9 @@ const clientes = ref<Cliente[]>([])
 const selectedClient = ref<Cliente | null>(null)
 const showClientModal = ref(false)
 const clientSearchQuery = ref('')
+
+// Promociones por item
+const itemPromociones = ref<Record<number, { nombre: string; tipo: string; valor: number }[]>>({})
 
 // RFID
 const rfidListening = ref(false)
@@ -157,6 +166,44 @@ const isProcessingPayment = ref(false)
 const toastMsg = ref('')
 const toastType = ref<'success' | 'warning' | 'error'>('success')
 const showToast = ref(false)
+
+// ── PERSISTENCIA ───────────────────────────────────────
+const TICKET_KEY = 'ticket_en_proceso'
+
+const saveTicket = () => {
+  const data = {
+    cart: cart.value,
+    selectedClient: selectedClient.value,
+    appliedPromociones: appliedPromociones.value,
+    orderNote: orderNote.value,
+    selectedPayment: selectedPayment.value,
+    timestamp: Date.now()
+  }
+  sessionStorage.setItem(TICKET_KEY, JSON.stringify(data))
+}
+
+const loadTicket = () => {
+  const saved = sessionStorage.getItem(TICKET_KEY)
+  if (saved) {
+    try {
+      const data = JSON.parse(saved)
+      cart.value = data.cart || []
+      selectedClient.value = data.selectedClient || null
+      appliedPromociones.value = data.appliedPromociones || []
+      orderNote.value = data.orderNote || ''
+      selectedPayment.value = data.selectedPayment || 'Efectivo'
+      return true
+    } catch (e) {
+      console.error('Error al cargar ticket:', e)
+      return false
+    }
+  }
+  return false
+}
+
+const clearSavedTicket = () => {
+  sessionStorage.removeItem(TICKET_KEY)
+}
 
 // ── AUDIO ──────────────────────────────────────────────
 let audioContext: AudioContext | null = null
@@ -253,24 +300,25 @@ const loadPaquetes = async () => {
   paquetesLoading.value = true
   try {
     const res = await fetchConToken('/paquetes/menu-completo')
-    // Formatear datos del paquete
+    console.log('📦 [DEBUG] Paquetes response:', JSON.stringify(res, null, 2))
+    // Formatear datos del paquete - ajustar campos según respuesta real
     if (res.datos && res.datos.length > 0) {
       paquetes.value = res.datos.map((p: any) => ({
         id_paquete: p.id_paquete,
-        nombre_paquete: p.nombre_paquete || p.nombre,
+        nombre_paquete: p.nombre,
         precio: Number(p.precio),
         descripcion: p.descripcion || '',
-        url_imagen: p.url_imagen || '',
+        url_imagen: p.imagen || '',
         grupos: (p.grupos || []).map((g: any) => ({
-          id_grupo: g.id_paquete_grupo,
+          id_grupo: g.id_grupo,
           nombre_grupo: g.nombre_grupo,
-          es_obligatorio: g.es_obligatorio,
-          cantidad_minima: g.cantidad_minima || 1,
-          cantidad_maxima: g.cantidad_maxima || g.cantidad,
-          productos: (g.productos || []).map((prod: any) => ({
+          es_obligatorio: g.obligatorio,
+          cantidad_minima: g.obligatorio ? 1 : 0,
+          cantidad_maxima: g.cantidad || 1,
+          productos: (g.opciones || []).map((prod: any) => ({
             id_producto: prod.id_producto,
             nombre_producto: prod.nombre_producto,
-            precio_adicional: Number(prod.precio_adicional || 0)
+            precio_adicional: Number(prod.precio_extra || 0)
           }))
         }))
       }))
@@ -283,22 +331,49 @@ const loadPromociones = async () => {
   try {
     const res = await fetchConToken('/promociones/mostrar')
     if (res.datos && res.datos.length > 0) {
-      promociones.value = res.datos.map((p: any) => ({
-        id_promocion: p.id_promocion,
-        nombre: p.nombre,
-        descripcion: p.descripcion || '',
-        tipo: p.tipo || 'porcentaje',
-        valor: Number(p.valor || 0),
-        es_temporal: p.es_temporal || false,
-        activo: p.activo !== false
-      }))
+      console.log('📦 DEBUG - Promociones raw:', JSON.stringify(res.datos))
+      promociones.value = res.datos.map((p: any) => {
+        let tipoNormalizado = p.tipo || 'descuento'
+        // Normalizar tipos: descuento -> porcentaje, 2x1 -> bogo, fijo -> monto
+        if (tipoNormalizado === 'descuento') tipoNormalizado = 'porcentaje'
+        else if (tipoNormalizado === '2x1') tipoNormalizado = 'bogo'
+        else if (tipoNormalizado === 'fijo') tipoNormalizado = 'monto'
+        
+        return {
+          id_promocion: p.id_promocion,
+          nombre: p.nombre || p.nombre_promocion,
+          descripcion: p.descripcion || '',
+          tipo: tipoNormalizado,
+          valor: Number(p.valor || 0),
+          es_temporal: p.es_temporal || false,
+          activo: p.activo !== false,
+          solo_clientes: p.solo_clientes || false,
+          hora_inicio: p.hora_inicio || null,
+          hora_fin: p.hora_fin || null,
+          dias: p.dias || null,
+          dias_aplicables: p.dias_aplicables || p.dias || null
+        }
+      })
     }
   } catch (e) { console.log('Promociones no disponibles') }
 }
 
 onMounted(() => {
-  loadData()
+  const ticketCargado = loadTicket()
+  loadData().then(() => {
+    if (ticketCargado && cart.value.length > 0) {
+      applyAutomaticPromotions()
+      displayToast('Ticket restored', 'success')
+    }
+  })
 })
+
+watch([cart, selectedClient], () => {
+  if (cart.value.length > 0) {
+    applyAutomaticPromotions()
+    saveTicket()
+  }
+}, { deep: true })
 
 // ── COMPUTADOS ─────────────────────────────────────────
 const filteredProducts = computed(() => {
@@ -330,33 +405,48 @@ const packageExtraPrice = computed(() => {
   return extra
 })
 
-// Descuentos
-const subtotal = computed(() => 
+// Descuentos - el precio ya incluye IVA, calculamos la base sin IVA
+const subtotalConIva = computed(() => 
   cart.value.reduce((acc, item) => acc + item.qty * item.unitTotal, 0)
 )
 
+const subtotalSinIva = computed(() => subtotalConIva.value / 1.16)
+
 const totalDescuentos = computed(() => {
-  return appliedPromociones.value.reduce((acc, promo) => {
+  let totalDesc = 0
+  
+  for (const promo of appliedPromociones.value) {
     if (promo.tipo === 'porcentaje') {
-      return acc + subtotal.value * (promo.valor / 100)
+      // Porcentaje sobre el subtotal sin IVA
+      totalDesc += subtotalSinIva.value * (promo.valor / 100)
     } else if (promo.tipo === 'monto') {
-      return acc + promo.valor
+      // Monto fijo
+      totalDesc += promo.valor
     } else if (promo.tipo === 'bogo') {
-      const items = cart.value.filter(i => i.qty >= 2)
-      if (items.length > 0) return acc + Math.min(...items.map(i => i.unitTotal))
+      // 2x1: descuento del producto más barato que sea bebida (sin IVA)
+      const itemsSinPaquete = cart.value.filter(i => !i.isPackage)
+      const bebidas = itemsSinPaquete.filter(i => i.categoria?.toLowerCase().includes('bebidas'))
+      const totalBebidas = bebidas.reduce((acc, item) => acc + item.qty, 0)
+      if (totalBebidas >= 2) {
+        const precios = bebidas.map(i => i.unitTotal / 1.16)
+        const masBarato = Math.min(...precios)
+        totalDesc += masBarato
+      }
     }
-    return acc
-  }, 0)
+  }
+  
+  return totalDesc
 })
 
-const taxBase = computed(() => subtotal.value - totalDescuentos.value)
+const taxBase = computed(() => subtotalSinIva.value - totalDescuentos.value)
 const iva = computed(() => taxBase.value * 0.16)
-const total = computed(() => taxBase.value + iva.value)
+const total = computed(() => subtotalConIva.value - totalDescuentos.value)
 
 // ── PRODUCTOS E INGREDIENTES ────────────────────────────
 const handleProductClick = async (product: Producto) => {
   isLoadingOptions.value = true
   const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${product.id_producto}`)
+  console.log('🍔 [DEBUG] Ingredientes response for product', product.id_producto, ':', JSON.stringify(res, null, 2))
   
   const opcionesActivas = (res.datos || []).filter((i: any) => i.activo).map((i: any) => ({
     ...i,
@@ -405,9 +495,11 @@ const addDirectlyToCart = (product: Producto, modifiers: IngredienteOpcion[]) =>
       qty: 1,
       basePrice: product.precio_base,
       modifiers: [...modifiers],
-      unitTotal: finalUnitPrice
+      unitTotal: finalUnitPrice,
+      categoria: product.categoria
     })
   }
+  console.log('🛒 Cart actual:', JSON.stringify(cart.value.map(i => ({ name: i.name, categoria: i.categoria }))))
   playSound('added')
   displayToast(`${product.nombre_producto} agregado`, 'success')
 }
@@ -550,6 +642,119 @@ const applyClientPromotions = () => {
   appliedPromociones.value = []
 }
 
+const applyAutomaticPromotions = () => {
+  const today = new Date()
+  const currentHour = today.getHours()
+  const dayOfWeek = today.getDay() // 0 = domingo, 1 = lunes, 2 = martes, ..., 6 = sábado
+  
+  console.log('🏷️ Debug promo - dayOfWeek:', dayOfWeek, 'Promociones activas:', activePromociones.value.map(p => ({ nombre: p.nombre, dias: p.dias, tipo: p.tipo })))
+  
+  const todayPromociones: { id_promocion: number; nombre: string; tipo: string; valor: number }[] = []
+  const newItemPromociones: Record<number, { nombre: string; tipo: string; valor: number }[]> = {}
+  
+  // Productos normales (no paquetes) en el carrito
+  const productosNormales = cart.value.filter(item => !item.isPackage)
+  
+  // Para 2x1: contar solo bebidas (considerando cantidad total)
+  const bebidasEnCarrito = productosNormales.filter(i => i.categoria?.toLowerCase().includes('bebidas'))
+  const totalBebidas = bebidasEnCarrito.reduce((acc, item) => acc + item.qty, 0)
+  const tieneBebidas = totalBebidas >= 2
+  console.log('🏷️ Debug promo - totalBebidas:', totalBebidas)
+  console.log('🏷️ Debug promo - productosNormales:', productosNormales.map(i => ({ name: i.name, categoria: i.categoria })), 'bebidas:', bebidasEnCarrito.length, 'tieneBebidas:', tieneBebidas)
+  
+  for (const promo of activePromociones.value) {
+    // Verificar si es para clientes específicos
+    if (promo.solo_clientes && !selectedClient.value) continue
+    
+    // Verificar horario si aplica
+    const horaInicio = String(promo.hora_inicio ?? '')
+    const horaFin = String(promo.hora_fin ?? '')
+    if (horaInicio.length > 0) {
+      const h = horaInicio.split(':')[0]
+      if (h && currentHour < parseInt(h)) continue
+    }
+    if (horaFin.length > 0) {
+      const h = horaFin.split(':')[0]
+      if (h && currentHour >= parseInt(h)) continue
+    }
+    
+    // Verificar días de la semana si aplica (puede ser array ["Martes","Sábado"] o string "martes,sabado")
+    const diasAplicables = (promo as any).dias_aplicables ?? promo.dias
+    if (diasAplicables) {
+      let diasPermitidos: string[] = []
+      
+      if (Array.isArray(diasAplicables)) {
+        // Formato array: ["Martes","Sábado"]
+        diasPermitidos = diasAplicables.map((d: string) => d.toLowerCase())
+      } else if (typeof diasAplicables === 'string') {
+        // Formato string: "martes,sabado"
+        diasPermitidos = diasAplicables.toLowerCase().split(',').map(d => d.trim())
+      }
+      
+      const diasMap: Record<number, string> = {
+        0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles', 
+        4: 'jueves', 5: 'viernes', 6: 'sabado'
+      }
+      const diaActual = diasMap[dayOfWeek]
+      if (!diasPermitidos.includes(diaActual)) continue
+    }
+    
+    // Para 2x1 (bogo) solo aplicar si hay al menos 2 bebidas
+    if (promo.tipo === 'bogo') {
+      if (!tieneBebidas) continue // No hay suficientes bebidas, saltamos esta promoción
+    }
+    
+    // Aplicar a cada producto normal
+    let promoAplicada = false
+    for (const item of productosNormales) {
+      // Para 2x1, verificar si es bebida
+      if (promo.tipo === 'bogo') {
+        const esBebida = item.categoria?.toLowerCase().includes('bebidas')
+        if (!esBebida) continue // Solo aplicar a bebidas
+      }
+      
+      if (!newItemPromociones[item.cartId]) {
+        newItemPromociones[item.cartId] = []
+      }
+      
+      // Para 2x1, aplicar solo al primer producto
+      if (promo.tipo === 'bogo') {
+        const index = productosNormales.findIndex(p => p.cartId === item.cartId)
+        if (index === 0) { // Solo al primer item
+          newItemPromociones[item.cartId].push({
+            id_promocion: promo.id_promocion,
+            nombre: promo.nombre,
+            tipo: promo.tipo,
+            valor: promo.valor
+          })
+          promoAplicada = true
+        }
+      } else {
+        newItemPromociones[item.cartId].push({
+          id_promocion: promo.id_promocion,
+          nombre: promo.nombre,
+          tipo: promo.tipo,
+          valor: promo.valor
+        })
+        promoAplicada = true
+      }
+    }
+    
+    // Solo agregar la promoción si realmente se aplicó a algún producto
+    if (promoAplicada && !todayPromociones.find(p => p.id_promocion === promo.id_promocion)) {
+      todayPromociones.push({
+        id_promocion: promo.id_promocion,
+        nombre: promo.nombre,
+        tipo: promo.tipo,
+        valor: promo.valor
+      })
+    }
+  }
+  
+  itemPromociones.value = newItemPromociones
+  appliedPromociones.value = todayPromociones
+}
+
 // ── CARRITO ─────────────────────────────────────────────
 const updateQty = (cartId: number, delta: number) => {
   const item = cart.value.find(i => i.cartId === cartId)
@@ -574,6 +779,8 @@ const clearCart = () => {
     appliedPromociones.value = []
     itemNotes.value = {}
     orderNote.value = ''
+    itemPromociones.value = {}
+    clearSavedTicket()
   }
 }
 
@@ -627,6 +834,8 @@ const processPay = async () => {
     appliedPromociones.value = []
     itemNotes.value = {}
     orderNote.value = ''
+    itemPromociones.value = {}
+    clearSavedTicket()
     showConfirmModal.value = false
     
   } catch (error) {
@@ -649,11 +858,6 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
     <!-- HEADER -->
     <header class="venta-header">
       <div class="header-left">
-        <button class="menu-btn" @click="router.push('/menu')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-          </svg>
-        </button>
         <h1 class="venta-title">Terminal POS</h1>
       </div>
       <div class="header-center">
@@ -808,7 +1012,8 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           </div>
         </div>
 
-        <div class="cart-items">
+        <div class="cart-scroll-wrapper">
+          <div class="cart-items">
           <div v-if="cart.length === 0" class="cart-empty">
             <svg viewBox="0 0 24 24" fill="none"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" stroke="currentColor" stroke-width="1.5"/><line x1="3" y1="6" x2="21" y2="6" stroke="currentColor" stroke-width="1.5"/></svg>
             <p>El ticket está vacío</p>
@@ -826,6 +1031,11 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
                   + {{ mod.nombre_ingrediente }} <span v-if="mod.precio_modificador > 0">(+${{mod.precio_modificador}})</span>
                 </li>
               </ul>
+              <div v-if="itemPromociones[item.cartId]?.length" class="item-promos">
+                <span v-for="promo in itemPromociones[item.cartId]" :key="promo.id_promocion" class="promo-item-tag">
+                  {{ promo.tipo === 'porcentaje' ? `${promo.valor}%` : promo.tipo === 'bogo' ? '2x1' : promo.tipo === 'monto' ? `-$${promo.valor}` : promo.nombre }}
+                </span>
+              </div>
               <div v-if="item.packageSelections?.length" class="package-selections">
                 <span v-for="sel in item.packageSelections" :key="sel.id_producto" class="sel-chip">
                   {{ sel.nombre }}
@@ -851,9 +1061,10 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
             </div>
           </div>
         </div>
+        </div>
 
         <div class="cart-totals">
-          <div class="totals-row"><span>Subtotal</span><span>${{ subtotal.toFixed(2) }}</span></div>
+          <div class="totals-row"><span>Subtotal (inc. IVA)</span><span>${{ subtotalConIva.toFixed(2) }}</span></div>
           <div v-if="totalDescuentos > 0" class="totals-row discount">
             <span>Descuentos</span><span>-${{ totalDescuentos.toFixed(2) }}</span>
           </div>
@@ -968,7 +1179,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           <div class="confirm-row"><span>Cliente:</span><span>{{ selectedClient?.nombre || 'Público General' }}</span></div>
           <div class="confirm-row"><span>Método:</span><span>{{ selectedPayment }}</span></div>
           <hr />
-          <div class="confirm-row"><span>Subtotal:</span><span>${{ subtotal.toFixed(2) }}</span></div>
+          <div class="confirm-row"><span>Subtotal (inc. IVA):</span><span>${{ subtotalConIva.toFixed(2) }}</span></div>
           <div v-if="totalDescuentos > 0" class="confirm-row discount"><span>Descuentos:</span><span>-${{ totalDescuentos.toFixed(2) }}</span></div>
           <div class="confirm-row"><span>IVA:</span><span>${{ iva.toFixed(2) }}</span></div>
           <hr />
@@ -995,7 +1206,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 * { box-sizing: border-box; }
 
 /* ── LAYOUT ── */
-.venta-layout { display: flex; flex-direction: column; min-height: 100vh; background: #f5f5f5; }
+.venta-layout { display: flex; flex-direction: column; min-height: 100vh; background: #f5f5f5; overflow: hidden; }
 .venta-main { flex: 1; display: flex; gap: 16px; padding: 16px; overflow: hidden; }
 
 /* ── HEADER ── */
@@ -1024,7 +1235,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 /* ── PANELS ── */
 .panel { background: #fff; border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 .panel--products { flex: 1; padding: 16px; gap: 12px; overflow: hidden; }
-.panel--cart { width: 380px; flex-shrink: 0; }
+.panel--cart { width: 380px; flex-shrink: 0; display: flex; flex-direction: column; height: calc(100vh - 80px); }
 
 /* ── SEARCH & TABS ── */
 .products-top { display: flex; align-items: center; gap: 12px; }
@@ -1072,7 +1283,8 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .promo-applied-tag { font-size: 11px; background: #10b981; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
 
 /* ── CART ITEMS ── */
-.cart-items { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
+.cart-items { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
+.cart-scroll-wrapper { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .cart-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #9ca3af; }
 .cart-empty svg { width: 48px; height: 48px; }
 
@@ -1082,6 +1294,8 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .badge-package { font-size: 9px; background: #f3f4f6; color: #6b7280; padding: 2px 4px; border-radius: 3px; font-weight: 700; }
 .item-unit { font-size: 12px; color: #6b7280; }
 .item-mods-list { margin: 2px 0 0 0; padding-left: 12px; font-size: 11px; color: #9ca3af; }
+.item-promos { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; padding-left: 12px; }
+.promo-item-tag { font-size: 10px; background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: 600; border: 1px solid #fcd34d; }
 .package-selections { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .sel-chip { font-size: 10px; background: #e0e7ff; color: #4338ca; padding: 2px 6px; border-radius: 4px; }
 

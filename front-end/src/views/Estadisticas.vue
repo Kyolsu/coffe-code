@@ -1,31 +1,77 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useAuthStore } from '../stores/auth'
 import Sidebar from '../components/Sidebar.vue'
+
+const API_BASE = 'http://localhost:3000/api'
+const authStore = useAuthStore()
 
 // ── TIPOS ─────────────────────────────
 interface Venta {
-  id: number
+  id_orden: number
   total: number
   fecha: string
+  estado_orden: string
 }
 
-// ── MOCK DATA (luego lo conectas a órdenes) ─────────────
-const ventas = ref<Venta[]>([
-  { id: 1, total: 120, fecha: '2026-03-15' },
-  { id: 2, total: 80,  fecha: '2026-03-16' },
-  { id: 3, total: 150, fecha: '2026-03-17' },
-  { id: 4, total: 60,  fecha: '2026-03-18' },
-  { id: 5, total: 200, fecha: '2026-03-19' },
-])
+interface StatsDia {
+  fecha: string
+  total: number
+  count: number
+}
 
-// ── FILTRO ────────────────────────────
+// ── FETCH ─────────────────────────────
+const fetchConToken = async (endpoint: string, method = 'GET', body: any = null) => {
+  try {
+    const options: RequestInit = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'auth-token': authStore.token || ''
+      }
+    }
+    if (body) options.body = JSON.stringify(body)
+    const response = await fetch(`${API_BASE}${endpoint}`, options)
+    const data = await response.json()
+    return data
+  } catch (err) {
+    console.error(`Error en ${endpoint}:`, err)
+    return { status: 'error', datos: [] }
+  }
+}
+
+// ── ESTADO ─────────────────────────────
+const isLoading = ref(false)
+const ventas = ref<Venta[]>([])
 const filtro = ref<'dia' | 'semana' | 'mes'>('semana')
 
+// ── CARGA DE DATOS ─────────────────────
+const loadData = async () => {
+  isLoading.value = true
+  const res = await fetchConToken('/ordenes/mostrar')
+
+  if (res.status === 'ok' && res.datos) {
+    ventas.value = res.datos
+      .filter((o: any) => o.estado_orden?.toLowerCase() !== 'cancelada' && o.estado_orden?.toLowerCase() !== 'cancelado')
+      .map((o: any) => ({
+        id_orden: o.id_orden,
+        total: o.total || 0,
+        fecha: o.fecha_creacion ? o.fecha_creacion.split('T')[0] : new Date().toISOString().split('T')[0],
+        estado_orden: o.estado_orden
+      }))
+  }
+
+  isLoading.value = false
+}
+
+// ── FILTRO ─────────────────────────────
 const ventasFiltradas = computed(() => {
   const hoy = new Date()
+  hoy.setHours(0, 0, 0, 0)
 
   return ventas.value.filter(v => {
     const fecha = new Date(v.fecha)
+    fecha.setHours(0, 0, 0, 0)
     const diff = (hoy.getTime() - fecha.getTime()) / (1000 * 3600 * 24)
 
     if (filtro.value === 'dia') return diff <= 1
@@ -33,50 +79,113 @@ const ventasFiltradas = computed(() => {
     if (filtro.value === 'mes') return diff <= 30
 
     return true
-  })
+  }).sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
 })
 
-// ── TOTAL ─────────────────────────────
+// ── AGRUPACIÓN POR DÍA ─────────────────
+const ventasPorDia = computed((): StatsDia[] => {
+  const mapa = new Map<string, { total: number; count: number }>()
+
+  ventasFiltradas.value.forEach(v => {
+    const existente = mapa.get(v.fecha) || { total: 0, count: 0 }
+    mapa.set(v.fecha, {
+      total: existente.total + v.total,
+      count: existente.count + 1
+    })
+  })
+
+  return Array.from(mapa.entries())
+    .map(([fecha, data]) => ({ fecha, ...data }))
+    .sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
+})
+
+// ── KPIs ─────────────────────────────
 const totalVentas = computed(() =>
   ventasFiltradas.value.reduce((acc, v) => acc + v.total, 0)
 )
 
-// ── GRÁFICA (SVG SIMPLE) ──────────────
-const puntos = computed(() => {
-  const max = Math.max(...ventasFiltradas.value.map(v => v.total), 1)
+const totalOrdenes = computed(() => ventasFiltradas.value.length)
 
-  return ventasFiltradas.value.map((v, i) => {
-    const x = (i / (ventasFiltradas.value.length - 1 || 1)) * 280
-    const y = 100 - (v.total / max) * 80
+const ticketPromedio = computed(() => {
+  if (totalOrdenes.value === 0) return 0
+  return totalVentas.value / totalOrdenes.value
+})
+
+const ordenesPorEstado = computed(() => {
+  const mapa = new Map<string, number>()
+  ventasFiltradas.value.forEach(v => {
+    const estado = v.estado_orden || 'desconocido'
+    mapa.set(estado, (mapa.get(estado) || 0) + 1)
+  })
+  return Object.fromEntries(mapa)
+})
+
+// ── GRÁFICA ─────────────────────────────
+const puntosGrafica = computed(() => {
+  const datos = ventasPorDia.value
+  if (datos.length === 0) return ''
+
+  const max = Math.max(...datos.map(d => d.total), 1)
+  const width = 280
+  const height = 80
+
+  return datos.map((d, i) => {
+    const x = datos.length === 1 ? width / 2 : (i / (datos.length - 1)) * width
+    const y = height - (d.total / max) * (height - 10)
     return `${x},${y}`
   }).join(' ')
+})
+
+const pathArea = computed(() => {
+  const datos = ventasPorDia.value
+  if (datos.length === 0) return ''
+
+  const max = Math.max(...datos.map(d => d.total), 1)
+  const width = 280
+  const height = 80
+
+  const puntos = datos.map((d, i) => {
+    const x = datos.length === 1 ? width / 2 : (i / (datos.length - 1)) * width
+    const y = height - (d.total / max) * (height - 10)
+    return `${x},${y}`
+  })
+
+  const primerPunto = puntos[0].replace(',', ',')
+  const ultimoPunto = puntos[puntos.length - 1].replace(',', ',')
+
+  return `M${primerPunto} L${puntos.join(' L')} L${ultimoPunto} L${ultimoPunto.split(',')[0]},${height} L${primerPunto.split(',')[0]},${height} Z`
+})
+
+onMounted(() => {
+  loadData()
 })
 </script>
 
 <template>
   <div class="layout">
-    <Sidebar />
-
     <main class="main">
 
       <header class="header">
-        <h1>Estadísticas</h1>
+        <div class="header-left">
+          <h1>Estadísticas</h1>
+          <span v-if="isLoading" class="loading-indicator">⟳</span>
+        </div>
 
         <div class="filters">
-          <button 
-            :class="{ active: filtro === 'dia' }" 
+          <button
+            :class="{ active: filtro === 'dia' }"
             @click="filtro = 'dia'"
           >
             Día
           </button>
-          <button 
-            :class="{ active: filtro === 'semana' }" 
+          <button
+            :class="{ active: filtro === 'semana' }"
             @click="filtro = 'semana'"
           >
             Semana
           </button>
-          <button 
-            :class="{ active: filtro === 'mes' }" 
+          <button
+            :class="{ active: filtro === 'mes' }"
             @click="filtro = 'mes'"
           >
             Mes
@@ -84,49 +193,123 @@ const puntos = computed(() => {
         </div>
       </header>
 
-      <div class="cards">
-
-        <div class="card">
-          <span>Total ventas</span>
-          <h2>${{ totalVentas }}</h2>
+      <div class="kpi-grid">
+        <div class="card kpi">
+          <span>Total Ventas</span>
+          <h2>${{ totalVentas.toFixed(2) }}</h2>
         </div>
 
-        <div class="card chart">
-          <span>Ventas</span>
+        <div class="card kpi">
+          <span>Órdenes</span>
+          <h2>{{ totalOrdenes }}</h2>
+        </div>
 
-          <svg viewBox="0 0 300 120">
+        <div class="card kpi">
+          <span>Ticket Promedio</span>
+          <h2>${{ ticketPromedio.toFixed(2) }}</h2>
+        </div>
+      </div>
+
+      <div class="charts-row">
+        <div class="card chart">
+          <span>Ventas por Día</span>
+
+          <svg viewBox="0 0 300 100" class="chart-svg">
+            <defs>
+              <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style="stop-color:var(--tenant-primario);stop-opacity:0.3" />
+                <stop offset="100%" style="stop-color:var(--tenant-primario);stop-opacity:0" />
+              </linearGradient>
+            </defs>
+
+            <path
+              v-if="pathArea"
+              :d="pathArea"
+              fill="url(#areaGradient)"
+              class="chart-area"
+            />
+
             <polyline
-              :points="puntos"
+              v-if="puntosGrafica"
+              :points="puntosGrafica"
               fill="none"
               class="chart-line"
               stroke-width="3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
             />
+
+            <g v-for="(d, i) in ventasPorDia" :key="d.fecha">
+              <circle
+                :cx="ventasPorDia.length === 1 ? 140 : (i / (ventasPorDia.length - 1)) * 280"
+                :cy="80 - (d.total / Math.max(...ventasPorDia.map(x => x.total), 1)) * 70"
+                r="4"
+                class="chart-dot"
+              />
+              <text
+                v-if="ventasPorDia.length <= 7"
+                :x="ventasPorDia.length === 1 ? 140 : (i / (ventasPorDia.length - 1)) * 280"
+                y="95"
+                class="chart-label"
+              >
+                {{ new Date(d.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' }) }}
+              </text>
+            </g>
           </svg>
         </div>
 
+        <div class="card chart">
+          <span>Órdenes por Estado</span>
+
+          <div class="estado-list">
+            <div
+              v-for="(count, estado) in ordenesPorEstado"
+              :key="estado"
+              class="estado-item"
+            >
+              <span class="estado-label">{{ estado }}</span>
+              <div class="estado-bar-container">
+                <div
+                  class="estado-bar"
+                  :style="{ width: `${(count / totalOrdenes) * 100}%` }"
+                ></div>
+              </div>
+              <span class="estado-count">{{ count }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="card table">
-        <h3>Historial</h3>
+        <h3>Historial de Órdenes</h3>
 
         <table>
           <thead>
             <tr>
-              <th>ID</th>
+              <th>ID Orden</th>
               <th>Fecha</th>
+              <th>Estado</th>
               <th>Total</th>
             </tr>
           </thead>
 
           <tbody>
-            <tr v-for="v in ventasFiltradas" :key="v.id">
-              <td>{{ v.id }}</td>
-              <td>{{ v.fecha }}</td>
-              <td>${{ v.total }}</td>
+            <tr v-for="v in ventasFiltradas.slice(0, 20)" :key="v.id_orden">
+              <td>#{{ v.id_orden }}</td>
+              <td>{{ new Date(v.fecha).toLocaleDateString('es-MX') }}</td>
+              <td>
+                <span :class="['estado-badge', v.estado_orden?.toLowerCase()]">
+                  {{ v.estado_orden }}
+                </span>
+              </td>
+              <td>${{ v.total.toFixed(2) }}</td>
             </tr>
           </tbody>
         </table>
 
+        <p v-if="ventasFiltradas.length === 0" class="no-data">
+          No hay datos en el período seleccionado
+        </p>
       </div>
 
     </main>
@@ -157,10 +340,26 @@ const puntos = computed(() => {
   margin-bottom: var(--espacio-5, 20px);
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--espacio-2, 8px);
+}
+
 .header h1 {
   margin: 0;
   font-size: var(--font-size-2xl, 30px);
   font-weight: var(--font-weight-bold, 600);
+}
+
+.loading-indicator {
+  font-size: 18px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .filters {
@@ -192,11 +391,39 @@ const puntos = computed(() => {
   color: #fff;
 }
 
-/* ── CARDS ── */
-.cards {
+/* ── KPIs ── */
+.kpi-grid {
   display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: var(--espacio-4, 15px);
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--espacio-4, 16px);
+  margin-bottom: var(--espacio-5, 20px);
+}
+
+.kpi {
+  text-align: center;
+  padding: var(--espacio-5, 20px);
+}
+
+.kpi span {
+  display: block;
+  font-size: var(--font-size-sm, 13px);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.kpi h2 {
+  margin: 8px 0 0 0;
+  font-size: 2rem;
+  color: var(--tenant-texto);
+  font-weight: var(--font-weight-bold, 600);
+}
+
+/* ── CHARTS ROW ── */
+.charts-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--espacio-4, 16px);
   margin-bottom: var(--espacio-5, 20px);
 }
 
@@ -205,35 +432,84 @@ const puntos = computed(() => {
   border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   padding: var(--espacio-5, 20px);
   border-radius: 12px;
-  display: flex;
-  flex-direction: column;
 }
 
 .card span {
+  display: block;
   font-size: var(--font-size-sm, 13px);
   color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: var(--font-weight-medium, 500);
-}
-
-.card h2 {
-  margin: 10px 0 0 0;
-  font-size: 2.5rem;
-  color: var(--tenant-texto);
-  font-weight: var(--font-weight-bold, 600);
+  margin-bottom: var(--espacio-3, 12px);
 }
 
 /* Gráfica */
-.chart svg {
+.chart-svg {
   width: 100%;
-  height: 120px;
-  margin-top: 10px;
+  height: 100px;
 }
 
 .chart-line {
   stroke: var(--tenant-primario);
   transition: all 0.3s ease;
+}
+
+.chart-area {
+  fill: url(#areaGradient);
+}
+
+.chart-dot {
+  fill: var(--tenant-primario);
+}
+
+.chart-label {
+  font-size: 9px;
+  fill: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
+  text-anchor: middle;
+}
+
+/* Estados */
+.estado-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espacio-3, 12px);
+}
+
+.estado-item {
+  display: flex;
+  align-items: center;
+  gap: var(--espacio-2, 8px);
+}
+
+.estado-label {
+  width: 90px;
+  font-size: var(--font-size-sm, 13px);
+  color: var(--tenant-texto);
+  text-transform: capitalize;
+}
+
+.estado-bar-container {
+  flex: 1;
+  height: 8px;
+  background: color-mix(in srgb, var(--tenant-texto) 10%, transparent);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.estado-bar {
+  height: 100%;
+  background: var(--tenant-primario);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.estado-count {
+  width: 30px;
+  text-align: right;
+  font-size: var(--font-size-sm, 13px);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--tenant-texto);
 }
 
 /* ── TABLA ── */
@@ -273,5 +549,37 @@ const puntos = computed(() => {
 
 .table tbody tr:hover {
   background: color-mix(in srgb, var(--tenant-texto) 2%, transparent);
+}
+
+.estado-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: var(--font-size-xs, 11px);
+  text-transform: capitalize;
+}
+
+.estado-badge.pendiente,
+.estado-badge.en proceso {
+  background: color-mix(in srgb, var(--color-advertencia, #f59e0b) 15%, transparent);
+  color: var(--color-advertencia, #f59e0b);
+}
+
+.estado-badge.lista,
+.estado-badge.completada,
+.estado-badge.entregada {
+  background: color-mix(in srgb, var(--color-exitoso, #22c55e) 15%, transparent);
+  color: var(--color-exitoso, #22c55e);
+}
+
+.estado-badge.cancelada,
+.estado-badge.cancelado {
+  background: color-mix(in srgb, var(--color-error, #ef4444) 15%, transparent);
+  color: var(--color-error, #ef4444);
+}
+
+.no-data {
+  text-align: center;
+  color: color-mix(in srgb, var(--tenant-texto) 40%, transparent);
+  padding: var(--espacio-6, 24px);
 }
 </style>
