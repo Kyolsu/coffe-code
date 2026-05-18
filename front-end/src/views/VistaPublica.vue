@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import Sidebar from '../components/Sidebar.vue'
 
 // ── TIPOS ─────────────────────────────
 type OrderStatus = 'pendiente' | 'preparacion' | 'entregada'
@@ -68,8 +67,6 @@ const formato = (o: Order) => `${o.orderNumber}${o.origen}`
 
 <template>
   <div class="layout">
-    <Sidebar />
-
     <main class="main">
 
       <!-- HEADER -->
@@ -142,13 +139,11 @@ const formato = (o: Order) => `${o.orderNumber}${o.origen}`
 <style scoped>
 /* LAYOUT */
 .layout {
-  display: flex;
   min-height: 100vh;
   background: #000;
 }
 
 .main {
-  flex: 1;
   padding: 20px;
 }
 

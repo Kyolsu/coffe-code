@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useAuthStore } from '../stores/auth'
 import Sidebar from '../components/Sidebar.vue'
+
+const API_BASE = 'http://localhost:3000/api'
+const authStore = useAuthStore()
 
 // ── TIPOS ──────────────────────────────────────────────
 type OrderStatus = 'pendiente' | 'preparacion' | 'lista' | 'entregada' | 'cancelada'
@@ -14,48 +18,151 @@ interface OrderItem {
 
 interface Order {
   id: number
-  orderNumber: number
+  id_orden: number
+  numero_orden: number
   status: OrderStatus
+  estado_orden: string
   items: OrderItem[]
   createdAt: string
   total: number
 }
 
 // ── ESTADO ─────────────────────────────────────────────
+const isLoading = ref(false)
+const error = ref<string | null>(null)
+let pollInterval: number | null = null
 
-// TODO: GET /ordenes — reemplazar mock con datos de API
-const orders = ref<Order[]>([
-  {
-    id: 1, orderNumber: 45, status: 'pendiente', createdAt: '10:02', total: 100,
-    items: [
-      { name: 'Chilaquiles',    qty: 1, customizations: ['Verde', 'Queso', 'Crema'], extras: [{ name: 'Pollo', qty: 1 }] },
-      { name: 'Plato de fruta', qty: 3, customizations: ['Miel', 'Granola'],          extras: [] },
-    ],
-  },
-  {
-    id: 2, orderNumber: 46, status: 'preparacion', createdAt: '10:05', total: 55,
-    items: [{ name: 'Enchiladas', qty: 2, customizations: ['Rojas'], extras: [] }],
-  },
-  {
-    id: 3, orderNumber: 47, status: 'lista', createdAt: '10:08', total: 106,
-    items: [
-      { name: 'Café americano', qty: 1, customizations: [],             extras: [] },
-      { name: 'Cappuccino',     qty: 2, customizations: ['Sin azúcar'], extras: [] },
-    ],
-  },
-  {
-    id: 4, orderNumber: 48, status: 'entregada', createdAt: '10:10', total: 75,
-    items: [{ name: 'Huevos rancheros', qty: 1, customizations: ['Salsa roja'], extras: [{ name: 'Tocino', qty: 2 }] }],
-  },
-  {
-    id: 5, orderNumber: 49, status: 'pendiente', createdAt: '10:12', total: 75,
-    items: [{ name: 'Jugo de naranja', qty: 3, customizations: [], extras: [] }],
-  },
-  {
-    id: 6, orderNumber: 50, status: 'cancelada', createdAt: '10:15', total: 90,
-    items: [{ name: 'Paquete desayuno', qty: 1, customizations: ['Sin frijoles'], extras: [{ name: 'Extra crema', qty: 1 }] }],
-  },
-])
+// ── FETCH ──────────────────────────────────────────────
+const fetchConToken = async (endpoint: string, method = 'GET', body: any = null) => {
+  try {
+    const options: RequestInit = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'auth-token': authStore.token || ''
+      }
+    }
+    if (body) options.body = JSON.stringify(body)
+    const response = await fetch(`${API_BASE}${endpoint}`, options)
+    const data = await response.json()
+    return data
+  } catch (err) {
+    console.error(`Error en ${endpoint}:`, err)
+    return { status: 'error', mensaje: 'Error de conexión' }
+  }
+}
+
+// ── MAPEO DE ESTADO ────────────────────────────────────
+const mapEstadoBackend = (estado: string): OrderStatus => {
+  const estadoLower = (estado || '').toLowerCase()
+  const mapa: Record<string, OrderStatus> = {
+    'pendiente': 'pendiente',
+    'en proceso': 'preparacion',
+    'preparacion': 'preparacion',
+    'preparando': 'preparacion',
+    'lista': 'lista',
+    'completada': 'entregada',
+    'entregada': 'entregada',
+    'cancelada': 'cancelada',
+    'cancelado': 'cancelada'
+  }
+  return mapa[estadoLower] || 'pendiente'
+}
+
+// ── CARGA DE DATOS ────────────────────────────────────
+const orders = ref<Order[]>([])
+
+const loadOrders = async () => {
+  isLoading.value = true
+  error.value = null
+
+  const [ordenesRes, detallesRes] = await Promise.all([
+    fetchConToken('/ordenes/mostrar'),
+    fetchConToken('/ordenes/detalles/mostrar')
+  ])
+
+  if (ordenesRes.status === 'ok' && ordenesRes.datos) {
+    const detalles = detallesRes.datos || []
+
+    orders.value = ordenesRes.datos.map((o: any) => {
+      const ordenDetalles = detalles.filter((d: any) => d.id_orden === o.id_orden)
+      const items: OrderItem[] = ordenDetalles.map((d: any) => ({
+        name: d.nombre_producto || d.nombre_paquete || 'Producto',
+        qty: d.cantidad || 1,
+        customizations: d.notas ? [d.notas] : [],
+        extras: []
+      }))
+
+      const total = ordenDetalles.reduce((acc: number, d: any) => acc + (d.subtotal || 0), 0)
+
+      return {
+        id: o.id_orden,
+        id_orden: o.id_orden,
+        numero_orden: o.numero_orden || o.id_orden,
+        status: mapEstadoBackend(o.estado_orden),
+        estado_orden: o.estado_orden,
+        items,
+        createdAt: o.fecha_creacion ? new Date(o.fecha_creacion).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '--:--',
+        total: total || o.total || 0
+      }
+    })
+  } else {
+    error.value = ordenesRes.mensaje || 'Error al cargar órdenes'
+  }
+
+  isLoading.value = false
+}
+
+// ── ACCIONES ────────────────────────────────────────────
+const editOrder = async (id: number) => {
+  const order = orders.value.find(o => o.id === id)
+  if (!order) return
+
+  const nuevoEstado = order.status === 'pendiente' ? 'preparacion' : order.status === 'preparacion' ? 'lista' : order.status
+  const res = await fetchConToken(`/ordenes/modificar/${id}`, 'PUT', { estado_orden: nuevoEstado })
+
+  if (res.status === 'ok') {
+    await loadOrders()
+  } else {
+    error.value = res.mensaje || 'Error al actualizar orden'
+  }
+}
+
+const deleteOrder = async (id: number) => {
+  if (!confirm('¿Estás seguro de cancelar esta orden?')) return
+
+  const res = await fetchConToken(`/ordenes/cancelar/${id}`, 'DELETE')
+
+  if (res.status === 'ok') {
+    orders.value = orders.value.filter(o => o.id !== id)
+  } else {
+    error.value = res.mensaje || 'Error al cancelar orden'
+  }
+}
+
+// ── POLLING ─────────────────────────────────────────────
+const startPolling = () => {
+  stopPolling()
+  pollInterval = window.setInterval(() => {
+    loadOrders()
+  }, 15000) // 15 segundos
+}
+
+const stopPolling = () => {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
+}
+
+onMounted(() => {
+  loadOrders()
+  startPolling()
+})
+
+onUnmounted(() => {
+  stopPolling()
+})
 
 // ── FILTRO POR STATUS ───────────────────────────────────
 const statusFilters: { label: string; value: OrderStatus | 'todas' }[] = [
@@ -83,16 +190,10 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
   entregada:   { label: 'Entregada',   color: 'var(--tenant-texto-muted, #6b7280)' },
   cancelada:   { label: 'Cancelada',   color: 'var(--color-error, #ef4444)' },
 }
-
-// ── ACCIONES ────────────────────────────────────────────
-const editOrder   = (id: number) => { /* TODO: abrir modal de edición — PATCH /ordenes/:id */ console.log('edit', id) }
-const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.value = orders.value.filter(o => o.id !== id) }
 </script>
 
 <template>
   <div class="ordenes-layout">
-    <Sidebar />
-
     <main class="ordenes-main">
 
       <header class="ordenes-header">
@@ -107,10 +208,25 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
             {{ f.label }}
           </button>
         </div>
-        <h1 class="page-title">Órdenes</h1>
+        <div class="header-right">
+          <h1 class="page-title">Órdenes</h1>
+          <span v-if="isLoading" class="loading-indicator">⟳</span>
+        </div>
       </header>
 
+      <div v-if="error" class="error-banner">
+        {{ error }}
+        <button @click="loadOrders">Reintentar</button>
+      </div>
+
       <div class="orders-grid">
+        <div v-if="filteredOrders.length === 0 && !isLoading" class="orders-empty">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <p>Sin órdenes en esta categoría</p>
+        </div>
+
         <div
           v-for="order in filteredOrders"
           :key="order.id"
@@ -118,7 +234,7 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
           :style="{ '--status-color': statusMeta[order.status].color }"
         >
           <div class="order-header">
-            <span class="order-number">Orden: {{ order.orderNumber }}</span>
+            <span class="order-number">Orden: {{ order.numero_orden }}</span>
             <span class="order-time">{{ order.createdAt }}</span>
           </div>
 
@@ -170,13 +286,6 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
               </button>
             </div>
           </div>
-        </div>
-
-        <div v-if="filteredOrders.length === 0" class="orders-empty">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-          <p>Sin órdenes en esta categoría</p>
         </div>
       </div>
 
@@ -245,12 +354,50 @@ const deleteOrder = (id: number) => { /* TODO: DELETE /ordenes/:id */ orders.val
   color: #fff;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--espacio-2, 8px);
+}
+
 .page-title {
   margin: 0;
   font-size: var(--font-size-2xl, 30px);
   font-weight: var(--font-weight-bold, 600);
   color: var(--tenant-texto);
   white-space: nowrap;
+}
+
+.loading-indicator {
+  font-size: 18px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.error-banner {
+  background: color-mix(in srgb, var(--color-error, #ef4444) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 30%, transparent);
+  color: var(--color-error, #ef4444);
+  padding: var(--espacio-3, 12px);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--espacio-3, 12px);
+}
+
+.error-banner button {
+  background: var(--color-error, #ef4444);
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--font-size-sm, 13px);
 }
 
 /* ── GRID ── */

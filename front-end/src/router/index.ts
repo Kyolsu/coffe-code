@@ -40,61 +40,61 @@ const router = createRouter({
           path: 'dashboard',
           name: 'dashboard',
           component: DashboardView,
-          meta: { roles: ['admin', 'gerente', 'cajero'] },
+          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
         },
         {
           path: 'venta',
           name: 'venta',
           component: VentaView,
-          meta: { roles: ['admin', 'gerente', 'cajero'] },
+          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
         },
         {
           path: 'cocina',
           name: 'cocina',
           component: KitchenDisplayView,
-          meta: { roles: ['admin', 'gerente', 'cocinero'] },
+          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
         },
         {
           path: 'menu',
           name: 'menu',
           component: () => import('../views/Menu.vue'),
-          meta: { roles: ['admin', 'gerente'] },
+          meta: { roles: ['admin', 'caja'] },
         },
         {
           path: 'ordenes',
           name: 'ordenes',
           component: () => import('../views/Ordenes.vue'),
-          meta: { roles: ['admin', 'gerente', 'cajero'] },
+          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
         },
         {
           path: 'clientes',
           name: 'clientes',
           component: () => import('../views/Clientes.vue'),
-          meta: { roles: ['admin', 'gerente', 'cajero'] },
+          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
         },
         {
           path: 'estadisticas',
           name: 'estadisticas',
           component: () => import('../views/Estadisticas.vue'),
-          meta: { roles: ['admin', 'gerente'] },
+          meta: { roles: ['admin', 'caja'] },
         },
         {
           path: 'usuarios',
           name: 'usuarios',
           component: () => import('../views/Usuarios.vue'),
-          meta: { roles: ['admin'] },
+          meta: { roles: ['admin'], requiresAdmin: true },
         },
         {
           path: 'personalizacion',
           name: 'personalizacion',
           component: () => import('../views/Personalizacion.vue'),
-          meta: { roles: ['admin'] },
+          meta: { roles: ['admin'], requiresAdmin: true },
         },
         {
           path: 'perfil',
           name: 'perfil',
           component: () => import('../views/Perfil.vue'),
-          meta: { roles: ['admin', 'gerente', 'cajero', 'cocinero'] },
+          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
         },
       ],
     },
@@ -110,34 +110,80 @@ const router = createRouter({
 // ── MAPEO DE ROL ─────────────────────────────────────────────────────────────
 const ROL_MAP: Record<string, string> = {
   '1': 'admin',
-  '2': 'gerente',
-  '3': 'cajero',
-  '4': 'cocinero',
+  '2': 'caja',
+  '3': 'cocina',
+  '4': 'bebidas',
+  '6': 'seguridad',
+}
+
+// ── RUTAS PÚBLICAS (sin validación de token) ───────────────────────────────
+const RUTAS_PUBLICAS = ['login', 'vista-publica']
+
+// ── VERIFICACIÓN DE TOKEN CON BACKEND ───────────────────────────────────────
+let tokenValidationPromise: Promise<boolean> | null = null
+
+async function validarTokenConBackend(): Promise<boolean> {
+  const token = localStorage.getItem('coffe_token')
+  if (!token) return false
+
+  try {
+    const res = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}/api/usuarios/perfil`, {
+      headers: { 'auth-token': token }
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+function limpiarSesion() {
+  localStorage.removeItem('coffe_token')
+  localStorage.removeItem('coffe_role')
+  localStorage.removeItem('coffe_nombre')
 }
 
 // ── GUARDIA DE NAVEGACIÓN ────────────────────────────────────────────────────
-router.beforeEach((to, _from) => {
+router.beforeEach(async (to, _from) => {
   const token           = localStorage.getItem('coffe_token')
   const isAuthenticated = token !== null
 
   const rolId    = localStorage.getItem('coffe_role') ?? ''
   const userRole = ROL_MAP[rolId] ?? null
 
+  // 0. Rutas públicas sin validación de token
+  if (RUTAS_PUBLICAS.includes(to.name as string)) {
+    return true
+  }
+
   // 1. Ruta pública con sesión activa → al dashboard
   if (to.name === 'login' && isAuthenticated) {
     return { name: 'dashboard' }
   }
 
-  // 2. Ruta protegida sin sesión → al login
-  // Al poner to.matched.some podemos verificar si el padre (Layout) requiere Auth
-  if (to.matched.some(record => record.meta.requiresAuth) && !isAuthenticated) {
-    return { name: 'login' }
+  // 2. Ruta protegida → verificar que tenga token Y que sea válido con el backend
+  if (to.matched.some(record => record.meta.requiresAuth)) {
+    if (!token) {
+      return { name: 'login' }
+    }
+
+    // Validar token con el backend (solo una vez por navegación)
+    if (!tokenValidationPromise) {
+      tokenValidationPromise = validarTokenConBackend()
+    }
+
+    const tokenValido = await tokenValidationPromise
+    tokenValidationPromise = null // Reset para próxima navegación
+
+    if (!tokenValido) {
+      limpiarSesion()
+      return { name: 'login', query: { expired: 'true' } }
+    }
   }
 
   // 3. Ruta con restricción de rol → verificar acceso
   const allowedRoles = to.meta.roles as string[] | undefined
   if (allowedRoles && userRole && !allowedRoles.includes(userRole)) {
-    if (userRole === 'cocinero') return { name: 'cocina' }
+    if (userRole === 'cocina' || userRole === 'bebidas') return { name: 'cocina' }
     return { name: 'dashboard' }
   }
 

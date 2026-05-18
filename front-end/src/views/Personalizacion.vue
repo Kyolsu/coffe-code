@@ -1,11 +1,8 @@
 <script setup lang="ts">
-import Sidebar from '@/components/Sidebar.vue'
 </script>
 
 <template>
   <div class="layout-principal">
-    <Sidebar />
-    
     <main class="contenido-principal">
       <div class="construccion-wrapper">
         <div class="mensaje-caja">

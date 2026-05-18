@@ -8,13 +8,14 @@ const authStore = useAuthStore()
 
 const isCollapsed = ref(false)
 
-// Rol real desde el store — ya mapeado a string ('admin', 'gerente', etc.)
+// Rol real desde el store — ya mapeado a string ('admin', 'caja', etc.)
 const userRole = computed(() => authStore.rol)
 
-// Determina si el usuario puede ver opciones de administración
-const esAdmin = computed(() =>
-  userRole.value === 'admin' || userRole.value === 'gerente'
-)
+// Permisos: 1=Tomar pedidos, 2=Ver pedidos, 3=Administrar menú, 4=Administrar usuarios
+const puedeTomarPedidos = computed(() => authStore.tienePermiso(1))
+const puedeVerPedidos = computed(() => authStore.tienePermiso(2))
+const puedeAdministrarMenu = computed(() => authStore.tienePermiso(3))
+const puedeAdministrarUsuarios = computed(() => authStore.tienePermiso(4))
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
@@ -67,13 +68,13 @@ const handleLogout = () => {
         <span v-if="!isCollapsed" class="nav-label">Ventas</span>
       </RouterLink>
 
-      <RouterLink to="/menu" class="nav-item">
+      <RouterLink v-if="puedeAdministrarMenu" to="/menu" class="nav-item">
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8zM6 2v3M10 2v3M14 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </span>
-        <span v-if="!isCollapsed" class="nav-label">Menú / Productos</span>
+        <span v-if="!isCollapsed" class="nav-label">Inventario</span>
       </RouterLink>
 
       <RouterLink to="/ordenes" class="nav-item">
@@ -118,8 +119,19 @@ const handleLogout = () => {
         <span v-if="!isCollapsed" class="nav-label">Estadísticas</span>
       </RouterLink>
 
-      <!-- Solo admin / gerente -->
-      <template v-if="esAdmin">
+      <a href="/menu-publico" target="_blank" class="nav-item">
+        <span class="nav-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+        </span>
+        <span v-if="!isCollapsed" class="nav-label">Vista Pública</span>
+      </a>
+
+      <!-- Solo usuarios con permiso 4 (administrar usuarios) -->
+      <template v-if="puedeAdministrarUsuarios">
         <div v-if="!isCollapsed" class="nav-divider"></div>
 
         <RouterLink to="/usuarios" class="nav-item">

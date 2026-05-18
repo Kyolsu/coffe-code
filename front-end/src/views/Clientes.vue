@@ -163,7 +163,7 @@ const handleSubmit = async () => {
   isSubmitting.value = true
   let endpoint = ''
   let method = ''
-  let payload = { ...formData.value }
+  const payload = { ...formData.value }
 
   if (modalType.value === 'crear') {
     endpoint = '/clientes/registro'

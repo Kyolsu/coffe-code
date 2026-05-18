@@ -1,47 +1,106 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import Sidebar from '../components/Sidebar.vue'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
+const authStore = useAuthStore()
+
+const API_BASE = 'http://localhost:3000/api'
 
 // ── TIPOS ──────────────────────────────────────────────
 interface OrderItem {
   name: string
   qty: number
-  customizations: string[]   // ej: ['Verde', 'Queso', 'Crema']
+  customizations: string[]
   extras: { name: string; qty: number }[]
 }
 
 interface Order {
   id: number
-  orderNumber: number
+  id_orden: number
+  numero_orden: number
   items: OrderItem[]
-  status: 'pendiente'        // El KD solo muestra pendientes
+  status: 'pendiente'
   createdAt: string
 }
 
-// ── ROL (mock) ──────────────────────────────────────────
-// TODO: obtener del store de autenticación
-const userRole = ref<'cocinero' | 'admin' | 'cajero'>('cocinero')
-const isCocinero = computed(() => userRole.value === 'cocinero')
+// ── ROL ────────────────────────────────────────────────
+const userRole = computed(() => authStore.rol || 'cocinero')
+const isCocinero = computed(() => {
+  const rol = String(userRole.value).toLowerCase()
+  return rol === 'cocinero' || rol === 'cajero' || rol === '3'
+})
 
-// ── ÓRDENES (mock) ──────────────────────────────────────
-// TODO: reemplazar con WebSocket o polling a la API
-const orders = ref<Order[]>([
-  {
-    id: 1, orderNumber: 45, status: 'pendiente', createdAt: '10:02',
-    items: [
-      { name: 'Chilaquiles', qty: 1, customizations: ['Verde', 'Queso', 'Crema'], extras: [{ name: 'Pollo', qty: 1 }] },
-      { name: 'Plato de fruta', qty: 3, customizations: ['Miel', 'Granola'], extras: [] },
-    ],
-  },
-  { id: 2, orderNumber: 46, status: 'pendiente', createdAt: '10:05', items: [{ name: 'Enchiladas', qty: 2, customizations: ['Rojas'], extras: [] }] },
-  { id: 3, orderNumber: 47, status: 'pendiente', createdAt: '10:08', items: [{ name: 'Café americano', qty: 1, customizations: [], extras: [] }, { name: 'Cappuccino', qty: 2, customizations: ['Sin azúcar'], extras: [] }] },
-  { id: 4, orderNumber: 48, status: 'pendiente', createdAt: '10:10', items: [{ name: 'Huevos rancheros', qty: 1, customizations: ['Salsa roja'], extras: [{ name: 'Tocino', qty: 2 }] }] },
-  { id: 5, orderNumber: 49, status: 'pendiente', createdAt: '10:12', items: [{ name: 'Jugo de naranja', qty: 3, customizations: [], extras: [] }] },
-  { id: 6, orderNumber: 50, status: 'pendiente', createdAt: '10:15', items: [{ name: 'Paquete desayuno', qty: 1, customizations: ['Sin frijoles'], extras: [{ name: 'Extra crema', qty: 1 }] }] },
-])
+// ── ESTADO ─────────────────────────────────────────────
+const isLoading = ref(false)
+const error = ref<string | null>(null)
+let pollInterval: number | null = null
+
+// ── FETCH ──────────────────────────────────────────────
+const fetchConToken = async (endpoint: string, method = 'GET', body: any = null) => {
+  try {
+    const options: RequestInit = {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'auth-token': authStore.token || ''
+      }
+    }
+    if (body) options.body = JSON.stringify(body)
+    const response = await fetch(`${API_BASE}${endpoint}`, options)
+    const data = await response.json()
+    return data
+  } catch (err) {
+    console.error(`Error en ${endpoint}:`, err)
+    return { status: 'error', mensaje: 'Error de conexión' }
+  }
+}
+
+// ── CARGA DE DATOS ────────────────────────────────────
+const orders = ref<Order[]>([])
+
+const loadOrders = async () => {
+  isLoading.value = true
+  error.value = null
+
+  const [ordenesRes, detallesRes] = await Promise.all([
+    fetchConToken('/ordenes/cocina'),
+    fetchConToken('/ordenes/detalles/mostrar')
+  ])
+
+  if (ordenesRes.status === 'ok' && ordenesRes.datos) {
+    const detalles = detallesRes.datos || []
+
+    orders.value = ordenesRes.datos
+      .filter((o: any) => {
+        const estado = (o.estado_orden || '').toLowerCase()
+        return estado === 'pendiente' || estado === 'en proceso' || estado === 'preparando'
+      })
+      .map((o: any) => {
+        const ordenDetalles = detalles.filter((d: any) => d.id_orden === o.id_orden)
+        const items: OrderItem[] = ordenDetalles.map((d: any) => ({
+          name: d.nombre_producto || d.nombre_paquete || 'Producto',
+          qty: d.cantidad || 1,
+          customizations: d.notas ? [d.notas] : [],
+          extras: []
+        }))
+
+        return {
+          id: o.id_orden,
+          id_orden: o.id_orden,
+          numero_orden: o.numero_orden || o.id_orden,
+          items,
+          status: 'pendiente' as const,
+          createdAt: o.fecha_creacion ? new Date(o.fecha_creacion).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '--:--'
+        }
+      })
+  } else {
+    error.value = ordenesRes.mensaje || 'Error al cargar órdenes de cocina'
+  }
+
+  isLoading.value = false
+}
 
 // ── SELECCIÓN Y TECLADO ─────────────────────────────────
 const selectedId = ref<number | null>(null)
@@ -50,10 +109,15 @@ const selectOrder = (id: number) => {
   selectedId.value = selectedId.value === id ? null : id
 }
 
-const markReady = (id: number) => {
-  // TODO: PATCH /ordenes/:id { status: 'lista' }
-  orders.value = orders.value.filter(o => o.id !== id)
-  selectedId.value = null
+const markReady = async (id: number) => {
+  const res = await fetchConToken(`/ordenes/modificar/${id}`, 'PUT', { estado_orden: 'lista' })
+
+  if (res.status === 'ok') {
+    orders.value = orders.value.filter(o => o.id !== id)
+    selectedId.value = null
+  } else {
+    error.value = res.mensaje || 'Error al marcar orden como lista'
+  }
 }
 
 const handleKeydown = (e: KeyboardEvent) => {
@@ -65,8 +129,30 @@ const handleKeydown = (e: KeyboardEvent) => {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', handleKeydown))
-onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
+// ── POLLING ─────────────────────────────────────────────
+const startPolling = () => {
+  pollInterval = window.setInterval(() => {
+    loadOrders()
+  }, 5000) // 5 segundos para cocina
+}
+
+const stopPolling = () => {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
+}
+
+onMounted(() => {
+  loadOrders()
+  startPolling()
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  stopPolling()
+  window.removeEventListener('keydown', handleKeydown)
+})
 
 // ── NAVEGACIÓN Y LOGOUT ─────────────────────────────────
 const goBack = () => {
@@ -81,8 +167,6 @@ const handleLogout = () => {
 
 <template>
   <div class="kd-layout">
-
-    <Sidebar v-if="!isCocinero" />
 
     <div v-if="isCocinero" class="floating-actions">
       <button class="btn-float btn-regresar" @click="goBack" title="Regresar al Dashboard">
@@ -105,6 +189,7 @@ const handleLogout = () => {
 
         <div class="kd-header-right">
           <div class="kd-count">
+            <span v-if="isLoading" class="kd-loading">⟳</span>
             <span class="kd-count-number">{{ orders.length }}</span>
             <span class="kd-count-label">pendientes</span>
           </div>
@@ -116,7 +201,17 @@ const handleLogout = () => {
         </div>
       </header>
 
+      <div v-if="error" class="kd-error">
+        {{ error }}
+        <button @click="loadOrders">Reintentar</button>
+      </div>
+
       <div class="kd-grid">
+        <div v-if="orders.length === 0 && !isLoading" class="kd-empty">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <p>Sin órdenes pendientes</p>
+        </div>
+
         <div
           v-for="order in orders"
           :key="order.id"
@@ -128,7 +223,7 @@ const handleLogout = () => {
           @keydown.enter.stop="markReady(order.id)"
         >
           <div class="order-header">
-            <span class="order-number">Orden: {{ order.orderNumber }}</span>
+            <span class="order-number">Orden: {{ order.numero_orden }}</span>
             <span class="order-time">{{ order.createdAt }}</span>
           </div>
 
@@ -159,11 +254,6 @@ const handleLogout = () => {
               Lista
             </button>
           </Transition>
-        </div>
-
-        <div v-if="orders.length === 0" class="kd-empty">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          <p>Sin órdenes pendientes</p>
         </div>
       </div>
 
@@ -305,6 +395,37 @@ const handleLogout = () => {
   font-weight: var(--font-weight-bold, 600);
   color: var(--color-advertencia, #f59e0b);
   line-height: 1;
+}
+
+.kd-loading {
+  font-size: 16px;
+  animation: spin 1s linear infinite;
+  margin-right: 4px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.kd-error {
+  background: color-mix(in srgb, var(--color-error, #ef4444) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 30%, transparent);
+  color: var(--color-error, #ef4444);
+  padding: var(--espacio-3, 12px);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.kd-error button {
+  background: var(--color-error, #ef4444);
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
 .kd-count-label {
