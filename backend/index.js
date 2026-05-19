@@ -1,33 +1,70 @@
 const express = require('express');
-const db = require('./db'); 
+const http = require('http'); //  Amarrar WebSockets
+const { Server } = require('socket.io'); // Servidor de Sockets
 const cors = require('cors');
-const app = express();
+
+const db = require('./db');
+
 const port = process.env.PORT || 3000;
-const usuariosRutas=require('./rutas/usuarios')
-const clientesRutas=require('./rutas/clientes')
-const ProductosRutas=require('./rutas/productos')
-const menuRutas=require('./rutas/menu')
-const tiendaRutas=require('./rutas/tienda_modulos')
-const paquetesRutas=require('./rutas/paquetes')
-const PromocionesRutas=require('./rutas/promociones')
-const ordenesRutas=require('./rutas/ordenes')
-const inventarioRutas=require('./rutas/inventario')
-const IOTRutas=require('./rutas/iot')
+
+// IMPORTACIÓN DE RUTAS
+const usuariosRutas = require('./rutas/usuarios');
+const clientesRutas = require('./rutas/clientes');
+const ProductosRutas = require('./rutas/productos');
+const menuRutas = require('./rutas/menu');
+const tiendaRutas = require('./rutas/tienda_modulos');
+const paquetesRutas = require('./rutas/paquetes');
+const PromocionesRutas = require('./rutas/promociones');
+const ordenesRutas = require('./rutas/ordenes');
+const inventarioRutas = require('./rutas/inventario');
+const IOTRutas = require('./rutas/iot');
+
+const app = express();
+
+// MIDDLEWARES (Limpios y sin repeticiones)
 app.use(express.json());
 app.use(cors({
-  origin: ['http://localhost:5173', 'https://coffe-code-psi.vercel.app']
+  origin: 'http://localhost:5173', // El puerto nativo de Vite/React de tu compa del frontend
+  methods: ["GET", "POST", "PUT", "DELETE"]
 }));
-//RUTAS DE ENDPOINTS
+
+// CREACIÓN DEL SERVIDOR HTTP CON EXPRESS
+const server = http.createServer(app);
+
+//INICIALIZACIÓN DE SOCKET.IO
+const io = new Server(server, {
+  cors: {
+    origin: 'http://localhost:5173',
+    methods: ["GET", "POST"]
+  }
+});
+
+//COMPARTIR 'IO' GLOBALMENTE PARA QUE TUS ENPOINTS (COMO IOT) PUEDAN USARLO
+app.set('socketio', io);
+
+// Evento de escucha para cuando el Frontend abra la página
+io.on('connection', (socket) => {
+  console.log(`Cliente web conectado al socket: ${socket.id}`);
+  
+  socket.on('disconnect', () => {
+    console.log('Cliente web desconectado de los sockets');
+  });
+});
+
+// RUTAS DE ENDPOINTS
 app.use('/api/usuarios', usuariosRutas);
-app.use('/api/clientes',clientesRutas);
-app.use('/api/productos',ProductosRutas);
-app.use('/api/menu',menuRutas);
-app.use('/api/tienda',tiendaRutas);
-app.use('/api/paquetes',paquetesRutas);
-app.use('/api/promociones',PromocionesRutas);
-app.use('/api/ordenes',ordenesRutas);
-app.use('/api/inventario',inventarioRutas);
-app.use('/api/iot',IOTRutas);
-app.listen(port, '0.0.0.0' ,() => {
+app.use('/api/clientes', clientesRutas);
+app.use('/api/productos', ProductosRutas);
+app.use('/api/menu', menuRutas);
+app.use('/api/tienda', tiendaRutas);
+app.use('/api/paquetes', paquetesRutas);
+app.use('/api/promociones', PromocionesRutas);
+app.use('/api/ordenes', ordenesRutas);
+app.use('/api/inventario', inventarioRutas);
+app.use('/api/iot', IOTRutas);
+
+// 
+server.listen(port, '0.0.0.0', () => {
   console.log(`Servidor corriendo en http://localhost:${port}`);
-}); 
+  console.log(`Canales de WebSockets listos y escuchando.`);
+});

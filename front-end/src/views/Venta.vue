@@ -225,8 +225,12 @@ const orderNote = ref('')
 const activeView = ref<'products' | 'paquetes' | 'promos'>('products')
 
 // Pago
-const paymentMethods = ['Efectivo', 'Tarjeta', 'Transferencia']
-const selectedPayment = ref('Efectivo')
+const paymentMethods = ['efectivo', 'tarjeta', 'transferencia', 'multiple', 'cortesia']
+const selectedPayment = ref('efectivo')
+
+const formatPaymentMethod = (method: string): string => {
+  return method.charAt(0).toUpperCase() + method.slice(1)
+}
 const showPaymentMenu = ref(false)
 
 // Confirmación de pago
@@ -262,7 +266,7 @@ const loadTicket = () => {
       selectedClient.value = data.selectedClient || null
       appliedPromociones.value = data.appliedPromociones || []
       orderNote.value = data.orderNote || ''
-      selectedPayment.value = data.selectedPayment || 'Efectivo'
+      selectedPayment.value = data.selectedPayment || 'efectivo'
       return true
     } catch (e) {
       console.error('Error al cargar ticket:', e)
@@ -1765,10 +1769,10 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           <div class="actions-row">
             <button class="btn btn--danger" @click="clearCart">Cancelar</button>
             <button class="btn btn--secondary" @click="showPaymentMenu = !showPaymentMenu">
-              {{ selectedPayment }}
+              {{ formatPaymentMethod(selectedPayment) }}
             </button>
             <div v-if="showPaymentMenu" class="payment-menu">
-              <button v-for="method in paymentMethods" :key="method" @click="selectedPayment = method; showPaymentMenu = false">{{ method }}</button>
+              <button v-for="method in paymentMethods" :key="method" @click="selectedPayment = method; showPaymentMenu = false">{{ formatPaymentMethod(method) }}</button>
             </div>
           </div>
           <button class="btn btn--primary btn-block" @click="openConfirmModal">
@@ -1926,7 +1930,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         <h3>¿Confirmar Orden?</h3>
         <div class="confirm-details">
           <div class="confirm-row"><span>Cliente:</span><span>{{ selectedClient?.nombre || 'Público General' }}</span></div>
-          <div class="confirm-row"><span>Método:</span><span>{{ selectedPayment }}</span></div>
+          <div class="confirm-row"><span>Método:</span><span>{{ formatPaymentMethod(selectedPayment) }}</span></div>
           <hr />
           <div class="confirm-row"><span>Subtotal (inc. IVA):</span><span>${{ subtotalConIva.toFixed(2) }}</span></div>
           <div v-if="totalDescuentos > 0" class="confirm-row discount"><span>Descuentos:</span><span>-${{ totalDescuentos.toFixed(2) }}</span></div>
