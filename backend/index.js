@@ -9,9 +9,10 @@ const ProductosRutas=require('./rutas/productos')
 const menuRutas=require('./rutas/menu')
 const tiendaRutas=require('./rutas/tienda_modulos')
 const paquetesRutas=require('./rutas/paquetes')
-const paquetesPromociones=require('./rutas/promociones')
+const PromocionesRutas=require('./rutas/promociones')
 const ordenesRutas=require('./rutas/ordenes')
 const inventarioRutas=require('./rutas/inventario')
+const IOTRutas=require('./rutas/iot')
 app.use(express.json());
 app.use(cors());
 app.use(express.json());
@@ -26,9 +27,10 @@ app.use('/api/productos',ProductosRutas);
 app.use('/api/menu',menuRutas);
 app.use('/api/tienda',tiendaRutas);
 app.use('/api/paquetes',paquetesRutas);
-app.use('/api/promociones',paquetesPromociones);
+app.use('/api/promociones',PromocionesRutas);
 app.use('/api/ordenes',ordenesRutas);
 app.use('/api/inventario',inventarioRutas);
-app.listen(port, () => {
+app.use('/api/iot',IOTRutas);
+app.listen(port, '0.0.0.0' ,() => {
   console.log(`Servidor corriendo en http://localhost:${port}`);
 }); 
