@@ -158,12 +158,12 @@ const loadPromociones = async () => {
     ...p,
     nombre_promocion: p.nombre_promocion || p.nombre || p.promocion,
     descripcion: p.descripcion || p.descripcion_promocion || '',
-    tipo: p.tipo || 'porcentaje',
-    valor: p.valor || 0,
+    tipo: p.tipo || p.tipo_promocion || 'porcentaje',
+    valor: p.valor || p.valor_descuento || 0,
     dias: p.dias || p.dias_aplicables || [],
-    es_temporal: p.es_temporal || false,
-    solo_clientes: p.solo_clientes || false,
-    _activo: true
+    es_temporal: p.es_temporal || p.tipo_vigencia === 'temporal' || false,
+    solo_clientes: p.solo_clientes || p.solo_clientes_registrados || false,
+    _activo: p.activo !== false
   }))
   isLoading.value = false
 }

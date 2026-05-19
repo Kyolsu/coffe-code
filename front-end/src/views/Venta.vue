@@ -20,6 +20,9 @@ interface Producto {
   precio_base: number
   categoria: string
   url_imagen: string
+  disponibilidad?: boolean
+  id_zona?: number | null
+  zona?: string
 }
 
 interface Cliente {
@@ -74,6 +77,8 @@ interface Promocion {
   hora_fin?: string | null
   dias?: string | null
   dias_aplicables?: string | string[] | null
+  clientes?: number[]
+  productos?: number[]
 }
 
 interface Beneficio {
@@ -321,6 +326,7 @@ const fetchConToken = async (endpoint: string) => {
 }
 
 const loadData = async () => {
+  console.log('=== loadData START ===')
   isLoading.value = true
   
   // Cargar todos los menús (activos e inactivos)
@@ -405,6 +411,7 @@ const loadPaquetes = async () => {
 }
 
 const loadPromociones = async () => {
+  console.log('=== loadPromociones START ===')
   try {
     const [promosRes, prodPromosRes, cliPromosRes] = await Promise.all([
       fetchConToken('/promociones/mostrar'),
@@ -412,8 +419,13 @@ const loadPromociones = async () => {
       fetchConToken('/promociones/clientes/mostrar')
     ])
     
+    console.log('DEBUG loadPromociones - promosRes:', JSON.stringify(promosRes))
+    console.log('DEBUG loadPromociones - prodPromosRes:', JSON.stringify(prodPromosRes))
+    console.log('DEBUG loadPromociones - cliPromosRes:', JSON.stringify(cliPromosRes))
+    
     if (promosRes.datos && promosRes.datos.length > 0) {
       console.log('📦 DEBUG - Promociones raw:', JSON.stringify(promosRes.datos))
+      console.log('📦 DEBUG - Promociones keys:', Object.keys(promosRes.datos[0]))
       
       // Map productos y clientes por promoción
       const productosPorPromo = new Map<number, number[]>()
@@ -433,12 +445,10 @@ const loadPromociones = async () => {
         })
       }
       
-      promociones.value = promosRes.datos.map((p: any) => {
-        let tipoNormalizado = p.tipo || p.tipo_promocion || 'descuento'
+      const mapped = promosRes.datos.map((p: any) => {
+        let tipoNormalizado = p.tipo_promocion || 'descuento'
         
-        // Normalizar tipos: descuento -> porcentaje, 2x1 -> bogo, fijo -> monto
-        // Si es porcentaje con valor 0, probablemente es un 2x1
-        if ((tipoNormalizado === 'descuento' || tipoNormalizado === 'porcentaje') && (p.valor === 0 || p.valor_descuento === 0)) {
+        if ((tipoNormalizado === 'descuento' || tipoNormalizado === 'porcentaje') && (p.valor_descuento === 0 || p.valor_descuento === '0')) {
           tipoNormalizado = 'bogo'
         } else if (tipoNormalizado === 'descuento') {
           tipoNormalizado = 'porcentaje'
@@ -448,7 +458,6 @@ const loadPromociones = async () => {
           tipoNormalizado = 'monto'
         }
         
-        // Parsear dias_aplicables
         let diasArray: string[] | null = null
         if (p.dias_aplicables) {
           if (Array.isArray(p.dias_aplicables)) {
@@ -463,13 +472,13 @@ const loadPromociones = async () => {
         
         return {
           id_promocion: p.id_promocion,
-          nombre: p.nombre || p.nombre_promocion || p.promocion,
+          nombre: p.nombre_promocion || p.nombre || '',
           descripcion: p.descripcion || '',
           tipo: tipoNormalizado,
-          valor: Number(p.valor || p.valor_descuento || 0),
-          es_temporal: p.es_temporal || false,
+          valor: Number(p.valor_descuento || 0),
+          es_temporal: p.tipo_vigencia === 'temporal' || p.es_temporal || false,
           activo: p.activo !== false,
-          solo_clientes: p.solo_clientes || p.solo_clientes_registrados || false,
+          solo_clientes: p.solo_clientes_registrados || false,
           hora_inicio: p.hora_inicio || null,
           hora_fin: p.hora_fin || null,
           dias: p.dias || null,
@@ -478,8 +487,15 @@ const loadPromociones = async () => {
           clientes: clientesSpecificos
         }
       })
+      
+      console.log('DEBUG mapped promos:', JSON.stringify(mapped))
+      promociones.value = mapped
+    } else {
+      console.log('DEBUG - No hay datos en promosRes.datos:', promosRes)
     }
-  } catch (e) { console.log('Promociones no disponibles', e) }
+  } catch (e) { 
+    console.error('Promociones no disponibles', e) 
+  }
 }
 
 onMounted(() => {
@@ -522,37 +538,71 @@ const activePromociones = computed(() => {
   const horaActual = ahora.getHours() * 60 + ahora.getMinutes()
   const diaSemana = ahora.getDay()
   const diasMap: Record<number, string> = { 0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles', 4: 'jueves', 5: 'viernes', 6: 'sabado' }
-  const diaActual = diasMap[diaSemana]
+  const diaActual = diasMap[diaSemana] || 'desconocido'
+  
+  console.log('DEBUG activePromociones - Cliente seleccionado:', selectedClient.value ? selectedClient.value.nombre : 'Público', 'ID:', selectedClient.value?.id_cliente)
+  console.log('DEBUG activePromociones - Todas las promos:', promociones.value.map(p => ({ 
+    nombre: p.nombre, 
+    activo: p.activo, 
+    solo_clientes: p.solo_clientes, 
+    clientes: p.clientes,
+    clientesLength: p.clientes?.length,
+    hora_inicio: p.hora_inicio,
+    hora_fin: p.hora_fin,
+    dias_aplicables: p.dias_aplicables
+  })))
   
   return promociones.value.filter(p => {
     // Solo activas
-    if (p.activo === false) return false
+    if (p.activo === false) {
+      console.log('DEBUG - Promo excluded: no activa', p.nombre)
+      return false
+    }
     
     // Si tiene clientes específicos, verificar que el cliente seleccionado esté en la lista
     if (p.clientes && p.clientes.length > 0) {
-      if (!selectedClient.value) return false
-      if (!p.clientes.includes(selectedClient.value.id_cliente)) return false
+      console.log('DEBUG - Promo tiene clientes específicos:', p.nombre, 'clientes:', p.clientes, 'selectedClient ID:', selectedClient.value?.id_cliente)
+      if (!selectedClient.value) {
+        console.log('DEBUG - Promo excluded: cliente específico pero nadie seleccionado', p.nombre)
+        return false
+      }
+      if (!p.clientes.includes(selectedClient.value.id_cliente)) {
+        console.log('DEBUG - Promo excluded: cliente no está en lista específica', p.nombre)
+        return false
+      }
     }
     
     // Si solo es para clientes registrados (no específicos)
     if (p.solo_clientes && (!p.clientes || p.clientes.length === 0)) {
-      if (!selectedClient.value) return false
+      console.log('DEBUG - Promo solo_clientes sin clientes específicos:', p.nombre, 'solo_clientes:', p.solo_clientes)
+      if (!selectedClient.value) {
+        console.log('DEBUG - Promo excluded: solo clientes pero nadie seleccionado', p.nombre)
+        return false
+      }
     }
     
     // Verificar horario
     if (p.hora_inicio && p.hora_fin) {
-      const horaInicio = p.hora_inicio.toString().split(':')
-      const horaFin = p.hora_fin.toString().split(':')
-      const minutosInicio = parseInt(horaInicio[0]) * 60 + parseInt(horaInicio[1] || '0')
-      const minutosFin = parseInt(horaFin[0]) * 60 + parseInt(horaFin[1] || '0')
-      if (horaActual < minutosInicio || horaActual >= minutosFin) return false
+      const horaInicio = (p.hora_inicio || '').toString().split(':')
+      const horaFin = (p.hora_fin || '').toString().split(':')
+      const minutosInicio = parseInt(horaInicio[0] || '0') * 60 + parseInt(horaInicio[1] || '0')
+      const minutosFin = parseInt(horaFin[0] || '0') * 60 + parseInt(horaFin[1] || '0')
+      if (horaActual < minutosInicio || horaActual >= minutosFin) {
+        console.log('DEBUG - Promo excluded: fuera de horario', p.nombre, horaActual, minutosInicio, minutosFin)
+        return false
+      }
     }
     
-    // Verificar días
+    // Verificar días - normalizar a minúsculas
     if (p.dias_aplicables && Array.isArray(p.dias_aplicables) && p.dias_aplicables.length > 0) {
-      if (!p.dias_aplicables.includes(diaActual)) return false
+      const diasLower = p.dias_aplicables.map((d: string) => d.toLowerCase().replace(/á/g,'a').replace(/é/g,'e').replace(/í/g,'i').replace(/ó/g,'o').replace(/ú/g,'u'))
+      if (!diasLower.includes(diaActual)) {
+        console.log('DEBUG - Promo excluded: día no aplica', p.nombre, 'diaActual:', diaActual, 'dias:', diasLower)
+        return false
+      }
     }
     
+    console.log('DEBUG - Promo included:', p.nombre)
     return true
   })
 })
@@ -655,9 +705,9 @@ const closeOptionsModal = () => {
 
 const isEditingCartItem = computed(() => editingCartItemId.value !== null)
 
-const addDirectlyToCart = (product: Producto, modifiers: IngredienteOpcion[]) => {
+const addDirectlyToCart = (product: Producto, modifiers: IngredienteOpcion[], overridePrice?: number | null) => {
   const modsPrice = modifiers.reduce((acc, mod) => acc + mod.precio_modificador, 0)
-  const finalUnitPrice = product.precio_base + modsPrice
+  const finalUnitPrice = overridePrice !== undefined && overridePrice !== null ? overridePrice + modsPrice : product.precio_base + modsPrice
 
   const existing = cart.value.find(item => {
     if (item.productId !== product.id_producto || item.isPackage) return false
@@ -863,9 +913,10 @@ const openPromoModal = async (promo: Promocion) => {
   promoSelectedProducts.value = {}
   
   // Cargar productos disponibles para esta promoción
-  if (promo.productos && promo.productos.length > 0) {
+  const promoProds = promo.productos || []
+  if (promoProds.length > 0) {
     // La promoción tiene productos específicos vinculados
-    promoProductos.value = allProducts.value.filter(p => promo.productos.includes(p.id_producto))
+    promoProductos.value = allProducts.value.filter(p => promoProds.includes(p.id_producto))
   } else {
     // La promoción aplica a todos los productos disponibles
     promoProductos.value = allProducts.value.filter(p => p.disponibilidad !== false && productosEnMenusActivos.value.includes(p.id_producto))
