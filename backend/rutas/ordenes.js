@@ -21,7 +21,7 @@ router.post('/agregar', verificarToken, async (req, res) => {
             notas 
         } = req.body;
 
-        const id_usuario = req.usuario.id_usuario; 
+        const id_usuario = req.usuario.id; 
 
         if (subtotal === undefined || total === undefined) {
             return res.status(400).json({
