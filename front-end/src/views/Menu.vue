@@ -54,8 +54,8 @@ const statusFilter = ref('activos')
 const catFilter = ref('')
 const zonaFilter = ref('')
 
-const categoriasUnicas = computed(() => [...new Set(productos.value.map(p => p.categoria).filter(Boolean))])
-const zonasUnicas = computed(() => [...new Set(productos.value.map(p => p.zona).filter(Boolean))])
+const categoriasUnicas = computed(() => [...new Set([...productos.value, ...productosDisponibles.value].map(p => p.categoria).filter(Boolean))])
+const zonasUnicas = computed(() => [...new Set([...productos.value, ...productosDisponibles.value].map(p => p.zona).filter(Boolean))])
 
 // ── FETCH BASE ───────────────────────────────────────────────────────────────
 const fetchConToken = async (endpoint: string, method = 'GET', body: any = null) => {
@@ -86,8 +86,8 @@ const loadProductos = async () => {
     fetchConToken('/productos/mostrar-inactivo')
   ])
   productos.value = [
-    ...(activos.datos || []).map((p: any) => ({ ...p, _activo: true })),
-    ...(inactivos.datos || []).map((p: any) => ({ ...p, _activo: false }))
+    ...(activos.datos || []).map((p: any) => ({ ...p, disponibilidad: p.disponibilidad !== undefined ? p.disponibilidad : true })),
+    ...(inactivos.datos || []).map((p: any) => ({ ...p, disponibilidad: p.disponibilidad !== undefined ? p.disponibilidad : false }))
   ]
   isLoading.value = false
 }
@@ -139,10 +139,12 @@ const loadPaquetes = async () => {
   isLoading.value = true
   const res = await fetchConToken('/paquetes/vista-completa')
   console.log('Paquetes response:', res)
+  console.log('DEBUG loadPaquetes - raw:', JSON.stringify(res.datos, null, 2))
   paquetes.value = (res.datos || []).map((p: any) => ({
     ...p,
-    paquete: p.nombre || p.nombre_paquete || p.paquete || 'Sin nombre',
+    paquete: p.nombre_paquete || p.nombre || p.paquete || 'Sin nombre',
     descripcion: p.descripcion || p.descripcion_paquete || '',
+    precio: parseFloat(p.precio_paquete) || parseFloat(p.precio) || 0,
     _activo: p.activo !== false && p.activo !== 0 && p.activo !== null
   }))
   isLoading.value = false
@@ -199,10 +201,28 @@ const promoPaquetesSeleccionados = ref<number[]>([])
 const promoCategoriaFiltro = ref<string>('')
 const promoScope = ref<'todos' | 'productos' | 'categorias'>('todos')
 const promoCategoriasSeleccionadas = ref<string[]>([])
+const promoTipoAplicacion = ref<'general' | 'registrados' | 'especifico'>('general')
+
+// Variables para menú - productos y paquetes vinculados
+const menuProductosSeleccionados = ref<number[]>([])
+const menuPaquetesSeleccionados = ref<number[]>([])
+const productosTodos = ref<any[]>([])
+const paquetesTodos = ref<any[]>([])
+const menuProductoBusqueda = ref('')
+const menuProductoFiltro = ref('activos')
 
 const loadProductosParaPaquetes = async () => {
-  const res = await fetchConToken('/productos/mostrar')
-  productosDisponibles.value = res.datos || []
+  const [activos, inactivos] = await Promise.all([
+    fetchConToken('/productos/mostrar'),
+    fetchConToken('/productos/mostrar-inactivo')
+  ])
+  console.log('DEBUG loadProductosParaPaquetes - activos:', JSON.stringify(activos.datos, null, 2))
+  console.log('DEBUG loadProductosParaPaquetes - inactivos:', JSON.stringify(inactivos.datos, null, 2))
+  productosDisponibles.value = [
+    ...(activos.datos || []).map((p: any) => ({ ...p, disponibilidad: p.disponibilidad !== undefined ? p.disponibilidad : true })),
+    ...(inactivos.datos || []).map((p: any) => ({ ...p, disponibilidad: p.disponibilidad !== undefined ? p.disponibilidad : false }))
+  ]
+  console.log('DEBUG loadProductosParaPaquetes - productosDisponibles final:', productosDisponibles.value.length, 'items')
 }
 
 const loadClientesParaPromocion = async () => {
@@ -221,12 +241,12 @@ const filteredClientes = computed(() => {
 })
 
 const getPromoProductosFiltrados = (categoria: string) => {
-  if (!categoria) return productosDisponibles.value.filter((p: any) => p._activo !== false)
-  return productosDisponibles.value.filter((p: any) => p.categoria === categoria && p._activo !== false)
+  if (!categoria) return productosDisponibles.value.filter((p: any) => p.disponibilidad !== false)
+  return productosDisponibles.value.filter((p: any) => p.categoria === categoria && p.disponibilidad !== false)
 }
 
 const paquetesActivos = computed(() => {
-  return paquetes.value.filter((p: any) => p._activo !== false)
+  return paquetes.value.filter((p: any) => p.disponibilidad !== false)
 })
 
 const addGrupo = () => {
@@ -294,7 +314,17 @@ const openAddModal = async (type: string) => {
   editingId.value = null
   formData.value = {}
   selectedIngredients.value = []
-  if (type === 'menu') selectedDias.value = []
+  if (type === 'menu') {
+    selectedDias.value = []
+    menuProductosSeleccionados.value = []
+    menuPaquetesSeleccionados.value = []
+    menuProductoBusqueda.value = ''
+    menuProductoFiltro.value = 'activos'
+    await Promise.all([
+      loadProductosParaPaquetes(),
+      loadPaquetes()
+    ])
+  }
   if (type === 'paquete') {
     paqueteGrupos.value = []
     selectedDiasPaquete.value = []
@@ -407,14 +437,32 @@ const handleEdit = async (type: string, item: any) => {
     } else {
       selectedDias.value = []
     }
+    // Cargar productos y paquetes disponibles, y los vinculados al menú
+    await Promise.all([
+      loadProductosParaPaquetes(),
+      loadPaquetes()
+    ])
+    // Cargar productos vinculados al menú
+    try {
+      const resMenuProd = await fetchConToken(`/menu/mostrar-menu/${item.id_menu}`)
+      console.log('DEBUG - Menu productos response:', JSON.stringify(resMenuProd.datos, null, 2))
+      if (resMenuProd.datos && resMenuProd.datos.length > 0) {
+        menuProductosSeleccionados.value = resMenuProd.datos
+          .map((mp: any) => mp.id_producto)
+          .filter((id: number) => id !== null && id !== undefined)
+        console.log('DEBUG - menuProductosSeleccionados:', menuProductosSeleccionados.value)
+      }
+    } catch (e) {
+      console.error('Error al cargar productos del menú', e)
+    }
   }
   else if (type === 'paquete') {
     // Soportar diferentes nombres de campo para el ID
     const pkgId = item.id || item.id_paquete
     editingId.value = pkgId
     console.log('Editando paquete:', item)
-    formData.value.nombre = item.paquete
-    formData.value.precio = item.precio
+    formData.value.nombre = item.paquete || item.nombre_paquete || item.nombre
+    formData.value.precio = item.precio || item.precio_paquete || 0
     formData.value.descripcion = item.descripcion || item.descripción
     formData.value.es_temporal = item.es_temporal
     formData.value.fecha_inicio = item.fecha_inicio ? item.fecha_inicio.split('T')[0] : ''
@@ -436,9 +484,10 @@ const handleEdit = async (type: string, item: any) => {
       console.log('Menu completo response:', resMenuCompleto)
       
       if (resMenuCompleto.datos) {
-        // Filtrar el paquete específico usando pkgId correcto
+        console.log('DEBUG - Buscando pkgId:', pkgId, 'tipo:', typeof pkgId)
+        console.log('DEBUG - Paquetes disponibles:', resMenuCompleto.datos.map((p: any) => ({id: p.id, id_paquete: p.id_paquete, nombre: p.paquete || p.nombre_paquete})))
         const paqueteCompleto = resMenuCompleto.datos.find((p: any) => 
-          p.id_paquete === pkgId
+          p.id_paquete === pkgId || p.id === pkgId
         )
         console.log('Paquete encontrado:', paqueteCompleto)
         
@@ -447,12 +496,16 @@ const handleEdit = async (type: string, item: any) => {
           await loadProductosParaPaquetes()
           
           // Por cada grupo, obtener sus productos
+          console.log('DEBUG - Estructura grupos:', JSON.stringify(paqueteCompleto.grupos, null, 2))
           for (const grupo of paqueteCompleto.grupos) {
+            console.log('DEBUG - Grupo individual:', JSON.stringify(grupo, null, 2))
+            const productosIds = grupo.opciones ? grupo.opciones.map((pg: any) => pg.id_producto) : []
+            console.log('DEBUG - Productos IDs extraídos:', productosIds)
             const grupoConProductos = {
               nombre: grupo.nombre_grupo || grupo.nombre,
-              obligatorio: grupo.es_obligatorio || false,
+              obligatorio: grupo.obligatorio || false,
               cantidad: grupo.cantidad || 1,
-              productos: grupo.productos ? grupo.productos.map((pg: any) => pg.id_producto) : [],
+              productos: productosIds,
               categoriaFiltro: ''
             }
             paqueteGrupos.value.push(grupoConProductos)
@@ -467,22 +520,50 @@ const handleEdit = async (type: string, item: any) => {
 else if (type === 'promocion') {
     const promoId = item.id_promocion || item.id
     editingId.value = promoId
-    formData.value.nombre = item.nombre_promocion || item.nombre || item.promocion
+    formData.value.nombre = item.nombre_promocion || item.nombre || item.promocion || ''
     formData.value.descripcion = item.descripcion || item.descripcion_promocion || ''
     
     // Normalizar tipo: porcentaje -> descuento, bogo -> 2x1, monto -> fijo
-    let tipoNorm = item.tipo || 'descuento'
+    let tipoNorm = item.tipo_promocion || item.tipo || item.tipo || 'descuento'
+    tipoNorm = tipoNorm.toString().toLowerCase().trim()
+    console.log('DEBUG - tipo_norm incoming:', tipoNorm)
     if (tipoNorm === 'porcentaje') tipoNorm = 'descuento'
-    else if (tipoNorm === 'bogo') tipoNorm = '2x1'
-    else if (tipoNorm === 'monto') tipoNorm = 'fijo'
+    else if (tipoNorm === 'bogo' || tipoNorm === '2x1' || tipoNorm === '2 x 1') tipoNorm = '2x1'
+    else if (tipoNorm === 'monto' || tipoNorm === 'fijo' || tipoNorm === '固定') tipoNorm = 'fijo'
+    console.log('DEBUG - tipo_norm normalized:', tipoNorm)
     formData.value.tipo = tipoNorm
     
-    formData.value.valor = item.valor || 0
-    formData.value.es_temporal = item.es_temporal || false
-    formData.value.es_permanente = item.es_permanente || false
-    formData.value.hora_inicio = item.hora_inicio || ''
-    formData.value.hora_fin = item.hora_fin || ''
-    formData.value.solo_clientes = item.solo_clientes || false
+    formData.value.valor = item.valor || item.valor_descuento || 0
+    formData.value.es_temporal = item.es_temporal || item.tipo_vigencia === 'temporal' || false
+    formData.value.es_permanente = item.es_permanente || item.tipo_vigencia === 'permanente' || false
+    
+    // Parsear fechas para datetime-local
+    if (item.fecha_inicio) {
+      const date = new Date(item.fecha_inicio)
+      formData.value.fecha_inicio = date.toISOString().slice(0, 16)
+    } else {
+      formData.value.fecha_inicio = ''
+    }
+    if (item.fecha_fin) {
+      const date = new Date(item.fecha_fin)
+      formData.value.fecha_fin = date.toISOString().slice(0, 16)
+    } else {
+      formData.value.fecha_fin = ''
+    }
+    
+    // Parsear horas
+    if (item.hora_inicio) {
+      formData.value.hora_inicio = typeof item.hora_inicio === 'string' ? item.hora_inicio.slice(0, 5) : ''
+    } else {
+      formData.value.hora_inicio = ''
+    }
+    if (item.hora_fin) {
+      formData.value.hora_fin = typeof item.hora_fin === 'string' ? item.hora_fin.slice(0, 5) : ''
+    } else {
+      formData.value.hora_fin = ''
+    }
+    
+    formData.value.solo_clientes = item.solo_clientes_registrados || item.solo_clientes || false
 
     // Cargar datos relacionados con la promoción
     await Promise.all([
@@ -499,7 +580,7 @@ else if (type === 'promocion') {
         return diasSemana.some(ds => ds.valor.toLowerCase().replace(/á/g,'a').replace(/é/g,'e').replace(/í/g,'i').replace(/ó/g,'o').replace(/ú/g,'u') === diaLimpio)
       })
     } else if (typeof diasData === 'string') {
-      let diasStr = diasData.replace(/[{}]/g, '')
+      const diasStr = diasData.replace(/[{}]/g, '')
       const diasArr = diasStr.split(',').map((d: string) => d.trim())
       selectedDiasPaquete.value = diasArr.filter((d: string) => {
         const diaLimpio = d.toLowerCase().replace(/á/g,'a').replace(/é/g,'e').replace(/í/g,'i').replace(/ó/g,'o').replace(/ú/g,'u')
@@ -516,7 +597,7 @@ else if (type === 'promocion') {
         const productosPromo = resProdPromo.datos.filter((pp: any) => pp.id_promocion === promoId)
         promoProductosSeleccionados.value = productosPromo.map((pp: any) => pp.id_producto)
         
-        // Determinar el ámbito
+        // Determinar el ámbito - si hay productos, es por productos
         if (productosPromo.length > 0) {
           promoScope.value = 'productos'
         }
@@ -540,15 +621,33 @@ else if (type === 'promocion') {
       console.error('Error al cargar paquetes de promoción', e)
     }
 
-    // Cargar clientes vinculados a la promoción
+// Cargar clientes vinculados a la promoción
     try {
       const resCliPromo = await fetchConToken('/promociones/clientes/mostrar')
       if (resCliPromo.datos) {
         const clientesPromo = resCliPromo.datos.filter((cp: any) => cp.id_promocion === promoId)
         selectedClientes.value = clientesPromo.map((cp: any) => cp.id_cliente)
+        
+        // Determinar tipo de aplicación
+        if (clientesPromo.length > 0) {
+          promoTipoAplicacion.value = 'especifico'
+        } else if (formData.value.solo_clientes) {
+          promoTipoAplicacion.value = 'registrados'
+        } else {
+          promoTipoAplicacion.value = 'general'
+        }
+      } else {
+        // Si no hay datos de clientes, determinar por el flag solo_clientes
+        if (formData.value.solo_clientes) {
+          promoTipoAplicacion.value = 'registrados'
+        } else {
+          promoTipoAplicacion.value = 'general'
+        }
       }
     } catch (e) {
       console.error('Error al cargar clientes de promoción', e)
+      // Por defecto, si hay error, poner como general
+      promoTipoAplicacion.value = formData.value.solo_clientes ? 'registrados' : 'general'
     }
   }
 
@@ -562,7 +661,7 @@ const handleDelete = async (type: string, id: number | string) => {
   let endpoint = ''
   let localUpdate: ((id: number | string) => void) | null = null
 
-  if (type === 'producto') { endpoint = `/productos/desactivar/${id}`; localUpdate = (id) => { const idx = productos.value.findIndex(p => p.id_producto === id); if (idx !== -1) productos.value[idx]._activo = false } }
+  if (type === 'producto') { endpoint = `/productos/desactivar/${id}`; localUpdate = (id) => { const idx = productos.value.findIndex(p => p.id_producto === id); if (idx !== -1) productos.value[idx].disponibilidad = false } }
   else if (type === 'ingrediente') { endpoint = `/productos/ingrediente/desactivar/${id}`; localUpdate = (id) => { const idx = ingredientes.value.findIndex(i => i.id === id); if (idx !== -1) ingredientes.value[idx]._activo = false } }
   else if (type === 'categoria') { endpoint = `/tienda/categorias/desactivar/${id}`; localUpdate = (id) => { const idx = categorias.value.findIndex(c => c.id_categoria === id); if (idx !== -1) categorias.value[idx]._activo = false } }
   else if (type === 'zona') { endpoint = `/tienda/zonas/desactivar/${id}`; localUpdate = (id) => { const idx = zonas.value.findIndex(z => z.id_zona === id); if (idx !== -1) zonas.value[idx]._activo = false } }
@@ -666,6 +765,10 @@ const closeModal = () => {
   promoScope.value = 'productos'
   promoCategoriasSeleccionadas.value = []
   promoCategoriaFiltro.value = ''
+  menuProductosSeleccionados.value = []
+  menuPaquetesSeleccionados.value = []
+  menuProductoBusqueda.value = ''
+  menuProductoFiltro.value = 'activos'
 }
 
 const handleSubmit = async () => {
@@ -742,11 +845,20 @@ const handleSubmit = async () => {
 
   if (modalType.value === 'promocion' && !isEditing.value) {
     formData.value.dias = selectedDiasPaquete.value.join(', ')
+    let tipoEnvio = formData.value.tipo
+    if (tipoEnvio === 'descuento') tipoEnvio = 'porcentaje'
+    if (tipoEnvio === 'fijo') tipoEnvio = 'monto'
+    let valorEnvio = formData.value.valor
+    if (formData.value.tipo === '2x1') {
+      valorEnvio = 0
+    } else if (typeof valorEnvio === 'string') {
+      valorEnvio = parseFloat(valorEnvio) || 0
+    }
     const promoData = {
       nombre: formData.value.nombre,
       descripcion: formData.value.descripcion || '',
-      tipo: formData.value.tipo,
-      valor: formData.value.tipo === '2x1' ? 0 : (formData.value.valor || 0),
+      tipo: tipoEnvio,
+      valor: valorEnvio,
       es_temporal: formData.value.es_temporal || false,
       fecha_inicio: formData.value.fecha_inicio || null,
       fecha_fin: formData.value.fecha_fin || null,
@@ -756,7 +868,7 @@ const handleSubmit = async () => {
       es_permanente: !formData.value.es_temporal,
       solo_clientes: formData.value.solo_clientes || false
     }
-    console.log('Enviando promoción:', promoData)
+    console.log('Enviando promoción:', promoData, 'tipo valor:', typeof valorEnvio)
     const res = await fetchConToken('/promociones/agregar', 'POST', promoData)
     
     if (res.status === 'ok' || res.status === 201) {
@@ -773,7 +885,7 @@ const handleSubmit = async () => {
 
       if (promoScope.value === 'categorias' && promoCategoriasSeleccionadas.value.length > 0) {
         const productosPorCategoria = productosDisponibles.value.filter((p: any) => 
-          promoCategoriasSeleccionadas.value.includes(p.categoria)
+          promoCategoriasSeleccionadas.value.includes(p.categoria) && p.disponibilidad !== false
         )
         for (const prod of productosPorCategoria) {
           await fetchConToken('/promociones/productos/vincular', 'POST', {
@@ -874,7 +986,55 @@ const handleSubmit = async () => {
         endpoint = isEditing.value ? `/menu/modificar/${editingId.value}` : '/menu/agregar'
         reloadFn = loadMenusYZonas
         formData.value.dias_semana = selectedDias.value.join(', ')
-        break
+        const resMenu = await fetchConToken(endpoint, method, formData.value)
+        
+        if (resMenu.status === 'ok' || resMenu.status === 201) {
+          const idMenu = isEditing.value ? editingId.value : resMenu.id_menu
+          
+          if (idMenu) {
+            // Obtener productos actuales del menú
+            let productosActuales: number[] = []
+            if (isEditing.value) {
+              try {
+                const resProdAct = await fetchConToken(`/menu/mostrar-menu/${idMenu}`)
+                productosActuales = (resProdAct.datos || [])
+                  .map((p: any) => p.id_producto)
+                  .filter((id: number) => id !== null && id !== undefined)
+              } catch (e) { console.error('Error al obtener productos actuales', e) }
+            }
+            
+            // Desvincular productos que ya no están seleccionados
+            for (const idProd of productosActuales) {
+              if (!menuProductosSeleccionados.value.includes(idProd)) {
+                try {
+                  await fetchConToken(`/menu/menu-producto/retirar?id_menu=${idMenu}&id_producto=${idProd}`, 'DELETE')
+                } catch (e) { console.error('Error al desvincular producto', e) }
+              }
+            }
+            
+            // Vincular nuevos productos seleccionados
+            for (const idProd of menuProductosSeleccionados.value) {
+              if (!productosActuales.includes(idProd)) {
+                try {
+                  await fetchConToken('/menu/menu-producto/agregar', 'POST', {
+                    id_menu: idMenu,
+                    id_producto: idProd
+                  })
+                } catch (e) { console.error('Error al vincular producto', e) }
+              }
+            }
+          }
+          
+          showToast('Guardado correctamente', 'success')
+          closeModal()
+          reloadFn()
+          isSubmitting.value = false
+          return
+        } else {
+          showToast(resMenu.mensaje || 'Error al guardar', 'error')
+          isSubmitting.value = false
+          return
+        }
       case 'paquete':
         endpoint = isEditing.value ? `/paquetes/actualizar/${editingId.value}` : '/paquetes/agregar'
         formData.value.dias_disponibles = selectedDiasPaquete.value.join(', ')
@@ -884,6 +1044,8 @@ const handleSubmit = async () => {
         endpoint = isEditing.value ? `/promociones/modificar/${editingId.value}` : '/promociones/agregar'
         formData.value.dias = selectedDiasPaquete.value.length > 0 ? `{${selectedDiasPaquete.value.join(',')}}` : null
         formData.value.es_permanente = !formData.value.es_temporal
+        formData.value.solo_clientes = promoTipoAplicacion.value === 'registrados' || promoTipoAplicacion.value === 'especifico'
+        if (!formData.value.tipo) formData.value.tipo = 'descuento'
         reloadFn = loadPromociones
         break
     }
@@ -1010,25 +1172,30 @@ const handleSubmit = async () => {
           const resGruposActuales = await fetchConToken(`/paquetes/grupo/mostrar/${editingId.value}`)
           const gruposActuales = resGruposActuales.datos || []
           
-          // Desvincular grupos que ya no existen
+          // Desvincular grupos existentes - silenciosamente
           for (const grupo of gruposActuales) {
-            // Desvincular productos del grupo
-            // Primero obtener los productos del grupo usando menu-completo
-            const resMenu = await fetchConToken('/paquetes/menu-completo')
-            const pkgData = resMenu.datos.find((p: any) => p.id_paquete === editingId.value)
-            if (pkgData && pkgData.grupos) {
-              const grpData = pkgData.grupos.find((g: any) => g.id_paquete_grupo === grupo.id_paquete_grupo)
-              if (grpData && grpData.productos) {
-                for (const prod of grpData.productos) {
-                  await fetchConToken('/paquetes/grupos-productos/desvincular', 'DELETE', {
-                    id_grupo: grupo.id_paquete_grupo,
-                    id_producto: prod.id_producto
-                  })
+            try {
+              // Desvincular productos del grupo (usar opciones en lugar de productos)
+              const resMenu = await fetchConToken('/paquetes/menu-completo')
+              const pkgData = resMenu.datos.find((p: any) => p.id_paquete === editingId.value)
+              if (pkgData && pkgData.grupos) {
+                const grpData = pkgData.grupos.find((g: any) => g.id_grupo === grupo.id_paquete_grupo || g.id_paquete_grupo === grupo.id_paquete_grupo)
+                if (grpData && grpData.opciones) {
+                  for (const prod of grpData.opciones) {
+                    try {
+                      await fetchConToken('/paquetes/grupos-productos/desvincular', 'DELETE', {
+                        id_grupo: grupo.id_paquete_grupo,
+                        id_producto: prod.id_producto
+                      })
+                    } catch (e) { /* silently skip */ }
+                  }
                 }
               }
-            }
-            // Desactivar el grupo
-            await fetchConToken(`/paquetes/grupos/desactivar/${grupo.id_paquete_grupo}`, 'DELETE')
+              // Intentar desactivar el grupo
+              try {
+                await fetchConToken(`/paquetes/grupos/desactivar/${grupo.id_paquete_grupo}`, 'DELETE')
+              } catch (e) { /* silently skip - puede que ya esté inactivo */ }
+            } catch (e) { /* silently skip */ }
           }
           
           // Crear los nuevos grupos
@@ -1073,7 +1240,8 @@ const filteredProductos = computed(() => {
   return productos.value.filter(p => {
     const desc = p.descripcion_pro || p.descripcion || ''
     const matchSearch = cleanText(p.nombre_producto).includes(term.value) || cleanText(p.descripcion).includes(term.value)
-    const matchStatus = statusFilter.value === 'todos' ? true : (statusFilter.value === 'activos' ? p._activo : !p._activo)
+    const isActivo = p.disponibilidad === true
+    const matchStatus = statusFilter.value === 'todos' ? true : (statusFilter.value === 'activos' ? isActivo : !isActivo)
     const matchCat = catFilter.value === '' ? true : p.categoria === catFilter.value
     const matchZona = zonaFilter.value === '' ? true : p.zona === zonaFilter.value
     return matchSearch && matchStatus && matchCat && matchZona
@@ -1114,9 +1282,27 @@ const filteredMenus = computed(() => {
 })
 
 const getProductosPorCategoria = (categoria: string) => {
-  if (!categoria) return productosDisponibles.value
-  return productosDisponibles.value.filter(p => p.categoria === categoria)
+  if (!categoria) return productosDisponibles.value.filter(p => p.disponibilidad !== false)
+  return productosDisponibles.value.filter(p => p.categoria === categoria && p.disponibilidad !== false)
 }
+
+const menuProductosFiltrados = computed(() => {
+  const term = cleanText(menuProductoBusqueda.value)
+  console.log('DEBUG menuProductosFiltrados - productosDisponibles:', productosDisponibles.value.length, 'menuProductoFiltro:', menuProductoFiltro.value, 'seleccionados:', menuProductosSeleccionados.value)
+  const filtered = productosDisponibles.value.filter(p => {
+    const matchSearch = cleanText(p.nombre_producto).includes(term)
+    const isSelected = menuProductosSeleccionados.value.includes(p.id_producto)
+    let matchStatus = true
+    if (menuProductoFiltro.value === 'activos') {
+      matchStatus = p.disponibilidad !== false || isSelected
+    } else if (menuProductoFiltro.value === 'inactivos') {
+      matchStatus = p.disponibilidad === false && !isSelected
+    }
+    return matchSearch && matchStatus
+  })
+  console.log('DEBUG menuProductosFiltrados - result:', filtered.length, 'items')
+  return filtered
+})
 
 const filteredPaquetes = computed(() => {
   return paquetes.value.filter(p => {
@@ -1201,7 +1387,7 @@ onMounted(() => {
 
       <div v-show="activeTab === 'productos' && !isLoading" class="grid-container">
         <div v-if="filteredProductos.length === 0" class="empty-state">No se encontraron productos.</div>
-        <div v-for="item in filteredProductos" :key="item.id_producto" :class="['card', { 'inactive-card': !item._activo }]">
+        <div v-for="item in filteredProductos" :key="item.id_producto" :class="['card', { 'inactive-card': !item.disponibilidad }]">
           <div class="card-header">
             <h3 class="card-title">{{ item.nombre_producto }}</h3>
             <span class="card-price">${{ item.precio_base }}</span>
@@ -1210,11 +1396,11 @@ onMounted(() => {
             <div class="badges-container">
               <span class="badge">{{ item.categoria }}</span>
               <span class="badge">{{ item.zona }}</span>
-              <span v-if="!item._activo" class="badge danger">Inactivo</span>
+              <span v-if="!item.disponibilidad" class="badge danger">Inactivo</span>
             </div>
             
             <div v-if="canManage" class="actions-container">
-              <template v-if="item._activo">
+              <template v-if="item.disponibilidad">
                 <button @click="handleEdit('producto', item)" class="action-btn edit-btn" title="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
                 <button @click="handleDelete('producto', item.id_producto)" class="action-btn delete-btn" title="Desactivar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
               </template>
@@ -1534,6 +1720,28 @@ onMounted(() => {
                 <input v-model="formData.fecha_fin" type="date" class="form-input" />
               </div>
             </div>
+            <div class="form-group">
+              <label>Productos del Menú:</label>
+              <div class="menu-productos-filtros">
+                <input v-model="menuProductoBusqueda" type="text" class="form-input" placeholder="Buscar producto..." style="flex:1; padding:6px 10px; font-size:13px;" />
+                <select v-model="menuProductoFiltro" class="form-select" style="width:auto; min-width:100px;">
+                  <option value="todos">Todos</option>
+                  <option value="activos">Solo activos</option>
+                  <option value="inactivos">Solo inactivos</option>
+                </select>
+              </div>
+              <div class="checkbox-grid">
+                <label v-for="prod in menuProductosFiltrados" :key="prod.id_producto" class="checkbox-item">
+                  <input 
+                    type="checkbox" 
+                    :value="prod.id_producto" 
+                    v-model="menuProductosSeleccionados" 
+                  />
+                  <span>{{ prod.nombre_producto }} (${{ prod.precio_base }})</span>
+                </label>
+              </div>
+              <p v-if="!menuProductosFiltrados || menuProductosFiltrados.length === 0" class="helper-text">No hay productos que coincidan con los filtros</p>
+            </div>
           </template>
 
           <template v-if="modalType === 'paquete'">
@@ -1678,23 +1886,6 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Aplicar a paquetes -->
-            <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 12px;">
-              <input v-model="promoAplicarPaquetes" type="checkbox" id="promoPaquetesCheck" />
-              <label for="promoPaquetesCheck" style="margin:0; cursor:pointer;">Aplicar también a paquetes</label>
-            </div>
-
-            <div v-if="promoAplicarPaquetes && paquetesActivos.length > 0" class="productos-grupo">
-              <label style="display: block; font-size: var(--font-size-xs, 11px); color: var(--tenant-texto-muted, #6b7280); margin-bottom: var(--espacio-1, 4px);">Selecciona paquetes:</label>
-              <div class="productos-list">
-                <label v-for="paq in paquetesActivos" :key="paq.id" class="producto-option">
-                  <input type="checkbox" :value="paq.id" v-model="promoPaquetesSeleccionados" />
-                  <span>{{ paq.paquete || paq.nombre }}</span>
-                </label>
-              </div>
-            </div>
-            <div v-else-if="promoAplicarPaquetes" class="empty-state" style="padding: 8px; font-size: 12px;">No hay paquetes activos disponibles</div>
-
             <!-- Temporal -->
             <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 12px;">
               <input v-model="formData.es_temporal" type="checkbox" id="promoTempCheck" />
@@ -1735,14 +1926,27 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Solo clientes -->
-            <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 12px;">
-              <input v-model="formData.solo_clientes" type="checkbox" id="soloClientesCheck" />
-              <label for="soloClientesCheck" style="margin:0; cursor:pointer;">¿Solo para clientes registrados?</label>
+            <!-- Tipo de aplicación -->
+            <div class="form-group">
+              <label>Aplicar a:</label>
+              <div class="tipo-aplicacion-opciones">
+                <label class="radio-label">
+                  <input type="radio" v-model="promoTipoAplicacion" value="general" />
+                  <span>General (todos los clientes)</span>
+                </label>
+                <label class="radio-label">
+                  <input type="radio" v-model="promoTipoAplicacion" value="registrados" />
+                  <span>Solo clientes registrados</span>
+                </label>
+                <label class="radio-label">
+                  <input type="radio" v-model="promoTipoAplicacion" value="especifico" />
+                  <span>Cliente específico</span>
+                </label>
+              </div>
             </div>
 
-            <!-- Selector de clientes -->
-            <div v-if="formData.solo_clientes" class="clientes-selector">
+            <!-- Selector de clientes específicos -->
+            <div v-if="promoTipoAplicacion === 'especifico'" class="clientes-selector">
               <div class="form-group">
                 <label>Buscar clientes:</label>
                 <input v-model="promoBusquedaCliente" type="text" class="form-input" placeholder="Escribe el nombre o correo..." />
@@ -1896,6 +2100,7 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .scope-options { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 4px; }
 .radio-label { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-sm, 13px); cursor: pointer; }
 .radio-label input { accent-color: var(--tenant-primario, #002D72); }
+.tipo-aplicacion-opciones { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .clientes-selector { border: 1px solid var(--color-borde, #e5e7eb); border-radius: 8px; padding: var(--espacio-3, 12px); background: var(--color-superficie-alt, #f3f4f6); }
 .clientes-list { display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto; margin-top: 8px; }
 .cliente-option { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--color-borde, #e5e7eb); border-radius: 4px; font-size: var(--font-size-sm, 13px); cursor: pointer; background: var(--color-superficie, #ffffff); }
@@ -1907,4 +2112,12 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .categoria-checkbox { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; font-size: var(--font-size-sm, 13px); cursor: pointer; background: var(--color-superficie, #ffffff); }
 .categoria-checkbox:hover { background: var(--color-superficie-alt, #f3f4f6); }
 .categoria-checkbox input { accent-color: var(--tenant-primario, #002D72); }
+
+/* ── MENÚ PRODUCTOS ── */
+.checkbox-grid { display: flex; flex-wrap: wrap; gap: 8px; max-height: 200px; overflow-y: auto; padding: 8px; border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; background: var(--color-superficie-alt, #f3f4f6); }
+.menu-productos-filtros { display: flex; gap: 8px; margin-bottom: 8px; }
+.checkbox-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--color-borde, #e5e7eb); border-radius: 4px; font-size: var(--font-size-sm, 13px); cursor: pointer; background: var(--color-superficie, #ffffff); }
+.checkbox-item:hover { background: var(--color-superficie-alt, #f3f4f6); }
+.checkbox-item input { accent-color: var(--tenant-primario, #002D72); }
+.helper-text { font-size: var(--font-size-sm, 13px); color: var(--tenant-texto-muted, #6b7280); margin-top: 4px; }
 </style>
