@@ -20,6 +20,9 @@ interface Producto {
   precio_base: number
   categoria: string
   url_imagen: string
+  disponibilidad?: boolean
+  id_zona?: number | null
+  zona?: string
 }
 
 interface Cliente {
@@ -74,6 +77,8 @@ interface Promocion {
   hora_fin?: string | null
   dias?: string | null
   dias_aplicables?: string | string[] | null
+  clientes?: number[]
+  productos?: number[]
 }
 
 interface Beneficio {
@@ -103,6 +108,10 @@ interface CartItem {
   packageSelections?: { id_grupo: number; id_producto: number; nombre: string }[]
   extraPrice?: number
   categoria?: string
+  promoGroupId?: number
+  promoGroupName?: string
+  isPromoItem?: boolean
+  packageProductModifiers?: Record<number, IngredienteOpcion[]>
 }
 
 // ── ESTADO ─────────────────────────────────────────────
@@ -113,11 +122,50 @@ const activeCategory = ref<string>('Todos')
 const searchQuery = ref('')
 const isLoading = ref(true)
 
+// Menús y productos por menú activo
+const menus = ref<any[]>([])
+const productosEnMenusActivos = ref<number[]>([])
+
+const esMenuActivoAhora = (menu: any): boolean => {
+  const ahora = new Date()
+  const horaActual = ahora.getHours() * 60 + ahora.getMinutes()
+  const diaSemana = ahora.getDay()
+  
+  const diasMap: Record<number, string> = {
+    0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles', 
+    4: 'jueves', 5: 'viernes', 6: 'sabado'
+  }
+  const diaActual = diasMap[diaSemana]
+  
+  // Verificar horario
+  if (menu.hora_inicio && menu.hora_fin) {
+    const horaInicio = menu.hora_inicio.toString().split(':')
+    const horaFin = menu.hora_fin.toString().split(':')
+    const minutosInicio = parseInt(horaInicio[0]) * 60 + parseInt(horaInicio[1] || '0')
+    const minutosFin = parseInt(horaFin[0]) * 60 + parseInt(horaFin[1] || '0')
+    
+    if (horaActual < minutosInicio || horaActual >= minutosFin) {
+      return false
+    }
+  }
+  
+  // Verificar días de la semana
+  if (menu.dias_semana) {
+    const diasMenu = menu.dias_semana.toLowerCase().split(',').map((d: string) => d.trim())
+    if (!diasMenu.includes(diaActual)) {
+      return false
+    }
+  }
+  
+  return true
+}
+
 // Opciones de Producto
 const showOptionsModal = ref(false)
 const selectedProductForOptions = ref<Producto | null>(null)
 const currentOptions = ref<IngredienteOpcion[]>([])
 const isLoadingOptions = ref(false)
+const editingCartItemId = ref<number | null>(null)
 
 // Clientes
 const clientes = ref<Cliente[]>([])
@@ -146,6 +194,28 @@ const packageValidationError = ref('')
 // Promociones
 const promociones = ref<Promocion[]>([])
 const appliedPromociones = ref<{ id_promocion: number; nombre: string; tipo: string; valor: number }[]>([])
+
+// Modal de promoción
+const showPromoModal = ref(false)
+const selectedPromo = ref<Promocion | null>(null)
+const promoProductos = ref<any[]>([])
+const promoSelectedProducts = ref<Record<number, number>>({})
+
+// Items de promoción con sus modifiers personalizados
+interface PromoItemWithModifiers {
+  product: Producto
+  modifiers: IngredienteOpcion[]
+}
+
+const promoItemsWithModifiers = ref<PromoItemWithModifiers[]>([])
+
+// Contexto para saber si el modal de opciones se abre desde promoción
+const isPromoContext = ref(false)
+const promoContextProduct = ref<Producto | null>(null)
+
+const totalPromoSeleccionados = computed(() => {
+  return promoItemsWithModifiers.value.length
+})
 
 // Notas
 const itemNotes = ref<Record<number, string>>({})
@@ -259,10 +329,15 @@ const displayToast = (msg: string, type: 'success' | 'warning' | 'error' = 'succ
 }
 
 // ── FETCH DATOS ────────────────────────────────────────
-const fetchConToken = async (endpoint: string) => {
+const fetchConToken = async (endpoint: string, options: RequestInit = {}) => {
   try {
     const res = await fetch(`${API_BASE}${endpoint}`, {
-      headers: { 'auth-token': authStore.token || '', 'Content-Type': 'application/json' }
+      headers: { 
+        'auth-token': authStore.token || '', 
+        'Content-Type': 'application/json',
+        ...options.headers
+      },
+      ...options
     })
     return await res.json()
   } catch (error) {
@@ -272,12 +347,39 @@ const fetchConToken = async (endpoint: string) => {
 }
 
 const loadData = async () => {
+  console.log('=== loadData START ===')
   isLoading.value = true
-  const [catRes, prodRes, cliRes] = await Promise.all([
+  
+  // Cargar todos los menús (activos e inactivos)
+  const [menusRes, catRes, prodRes, cliRes] = await Promise.all([
+    fetchConToken('/menu/mostrar-activo'),
     fetchConToken('/tienda/categorias/mostrar'),
     fetchConToken('/productos/mostrar'),
     fetchConToken('/clientes/mostrar-activos')
   ])
+
+  // Guardar todos los menús
+  menus.value = menusRes.datos || []
+  
+  // Filtrar menús activos ahora (hora y día)
+  const menusActivosAhora = menus.value.filter((m: any) => esMenuActivoAhora(m))
+  console.log('DEBUG - Todos los menús:', menus.value.map((m: any) => ({ nombre: m.nombre_menu, hora_inicio: m.hora_inicio, hora_fin: m.hora_fin, dias: m.dias_semana })))
+  console.log('DEBUG - Menús activos ahora:', menusActivosAhora.map((m: any) => ({ nombre: m.nombre_menu })))
+  
+  // Obtener productos de cada menú activo ahora
+  const productosEnMenuIds = new Set<number>()
+  for (const menu of menusActivosAhora) {
+    try {
+      const resProdMenu = await fetchConToken(`/menu/mostrar-menu/${menu.id_menu}`)
+      if (resProdMenu.datos && resProdMenu.datos.length > 0) {
+        resProdMenu.datos.forEach((mp: any) => {
+          if (mp.id_producto) productosEnMenuIds.add(mp.id_producto)
+        })
+      }
+    } catch (e) { console.warn('Error obteniendo productos del menú', menu.id_menu) }
+  }
+  productosEnMenusActivos.value = Array.from(productosEnMenuIds)
+  console.log('DEBUG - Productos en menús activos:', productosEnMenusActivos.value)
 
   categorias.value = [{ id_categoria: 0, nombre_cat: 'Todos' }, ...(catRes.datos || [])]
   
@@ -286,12 +388,13 @@ const loadData = async () => {
     nombre_producto: p.nombre_producto,
     precio_base: Number(p.precio_base || p.precio || 0),
     categoria: p.categoria || 'Sin categoría',
-    url_imagen: p.url_imagen || ''
+    url_imagen: p.url_imagen || '',
+    disponibilidad: p.disponibilidad !== undefined ? p.disponibilidad : true
   }))
 
   clientes.value = cliRes.datos || []
   
-  // Cargar paquetes y promociones (espacio listo para endpoints)
+  // Cargar paquetes y promociones
   await Promise.all([loadPaquetes(), loadPromociones()])
   
   isLoading.value = false
@@ -329,41 +432,97 @@ const loadPaquetes = async () => {
 }
 
 const loadPromociones = async () => {
+  console.log('=== loadPromociones START ===')
   try {
-    const res = await fetchConToken('/promociones/mostrar')
-    if (res.datos && res.datos.length > 0) {
-      console.log('📦 DEBUG - Promociones raw:', JSON.stringify(res.datos))
-      promociones.value = res.datos.map((p: any) => {
-        let tipoNormalizado = p.tipo || 'descuento'
-        // Normalizar tipos: descuento -> porcentaje, 2x1 -> bogo, fijo -> monto
-        if (tipoNormalizado === 'descuento') tipoNormalizado = 'porcentaje'
-        else if (tipoNormalizado === '2x1') tipoNormalizado = 'bogo'
-        else if (tipoNormalizado === 'fijo') tipoNormalizado = 'monto'
+    const [promosRes, prodPromosRes, cliPromosRes] = await Promise.all([
+      fetchConToken('/promociones/mostrar'),
+      fetchConToken('/promociones/productos/mostrar'),
+      fetchConToken('/promociones/clientes/mostrar')
+    ])
+    
+    console.log('DEBUG loadPromociones - promosRes:', JSON.stringify(promosRes))
+    console.log('DEBUG loadPromociones - prodPromosRes:', JSON.stringify(prodPromosRes))
+    console.log('DEBUG loadPromociones - cliPromosRes:', JSON.stringify(cliPromosRes))
+    
+    if (promosRes.datos && promosRes.datos.length > 0) {
+      console.log('📦 DEBUG - Promociones raw:', JSON.stringify(promosRes.datos))
+      console.log('📦 DEBUG - Promociones keys:', Object.keys(promosRes.datos[0]))
+      
+      // Map productos y clientes por promoción
+      const productosPorPromo = new Map<number, number[]>()
+      const clientesPorPromo = new Map<number, number[]>()
+      
+      if (prodPromosRes.datos) {
+        (prodPromosRes.datos as any[]).forEach((pp: any) => {
+          if (!productosPorPromo.has(pp.id_promocion)) productosPorPromo.set(pp.id_promocion, [])
+          productosPorPromo.get(pp.id_promocion)!.push(pp.id_producto)
+        })
+      }
+      
+      if (cliPromosRes.datos) {
+        (cliPromosRes.datos as any[]).forEach((cp: any) => {
+          if (!clientesPorPromo.has(cp.id_promocion)) clientesPorPromo.set(cp.id_promocion, [])
+          clientesPorPromo.get(cp.id_promocion)!.push(cp.id_cliente)
+        })
+      }
+      
+      const mapped = promosRes.datos.map((p: any) => {
+        let tipoNormalizado = p.tipo_promocion || 'descuento'
+        
+        if ((tipoNormalizado === 'descuento' || tipoNormalizado === 'porcentaje') && (p.valor_descuento === 0 || p.valor_descuento === '0')) {
+          tipoNormalizado = 'bogo'
+        } else if (tipoNormalizado === 'descuento') {
+          tipoNormalizado = 'porcentaje'
+        } else if (tipoNormalizado === '2x1') {
+          tipoNormalizado = 'bogo'
+        } else if (tipoNormalizado === 'fijo') {
+          tipoNormalizado = 'monto'
+        }
+        
+        let diasArray: string[] | null = null
+        if (p.dias_aplicables) {
+          if (Array.isArray(p.dias_aplicables)) {
+            diasArray = p.dias_aplicables
+          } else if (typeof p.dias_aplicables === 'string') {
+            const cleaned = p.dias_aplicables.replace(/[{}]/g, '')
+            diasArray = cleaned.split(',').map((d: string) => d.trim().toLowerCase())
+          }
+        }
+        
+        const clientesSpecificos = clientesPorPromo.get(p.id_promocion) || []
         
         return {
           id_promocion: p.id_promocion,
-          nombre: p.nombre || p.nombre_promocion,
+          nombre: p.nombre_promocion || p.nombre || '',
           descripcion: p.descripcion || '',
           tipo: tipoNormalizado,
-          valor: Number(p.valor || 0),
-          es_temporal: p.es_temporal || false,
+          valor: Number(p.valor_descuento || 0),
+          es_temporal: p.tipo_vigencia === 'temporal' || p.es_temporal || false,
           activo: p.activo !== false,
-          solo_clientes: p.solo_clientes || false,
+          solo_clientes: p.solo_clientes_registrados || false,
           hora_inicio: p.hora_inicio || null,
           hora_fin: p.hora_fin || null,
           dias: p.dias || null,
-          dias_aplicables: p.dias_aplicables || p.dias || null
+          dias_aplicables: diasArray,
+          productos: productosPorPromo.get(p.id_promocion) || [],
+          clientes: clientesSpecificos
         }
       })
+      
+      console.log('DEBUG mapped promos:', JSON.stringify(mapped))
+      promociones.value = mapped
+    } else {
+      console.log('DEBUG - No hay datos en promosRes.datos:', promosRes)
     }
-  } catch (e) { console.log('Promociones no disponibles') }
+  } catch (e) { 
+    console.error('Promociones no disponibles', e) 
+  }
 }
 
 onMounted(() => {
   const ticketCargado = loadTicket()
   loadData().then(() => {
     if (ticketCargado && cart.value.length > 0) {
-      applyAutomaticPromotions()
       displayToast('Ticket restored', 'success')
     }
   })
@@ -371,7 +530,6 @@ onMounted(() => {
 
 watch([cart, selectedClient], () => {
   if (cart.value.length > 0) {
-    applyAutomaticPromotions()
     saveTicket()
   }
 }, { deep: true })
@@ -379,9 +537,12 @@ watch([cart, selectedClient], () => {
 // ── COMPUTADOS ─────────────────────────────────────────
 const filteredProducts = computed(() => {
   return allProducts.value.filter(p => {
+    // Solo mostrar productos que están en menús activos ahora Y están disponibles
+    const enMenuActivo = productosEnMenusActivos.value.includes(p.id_producto)
+    const isDisponible = p.disponibilidad !== false
     const matchCat = activeCategory.value === 'Todos' || p.categoria === activeCategory.value
     const matchSearch = p.nombre_producto.toLowerCase().includes(searchQuery.value.toLowerCase())
-    return matchCat && matchSearch
+    return enMenuActivo && isDisponible && matchCat && matchSearch
   })
 })
 
@@ -393,9 +554,79 @@ const filteredClientes = computed(() => {
 
 const activePaquetes = computed(() => paquetes.value.filter(p => p.precio > 0))
 
-const activePromociones = computed(() => 
-  promociones.value.filter(p => p.activo !== false)
-)
+const activePromociones = computed(() => {
+  const ahora = new Date()
+  const horaActual = ahora.getHours() * 60 + ahora.getMinutes()
+  const diaSemana = ahora.getDay()
+  const diasMap: Record<number, string> = { 0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles', 4: 'jueves', 5: 'viernes', 6: 'sabado' }
+  const diaActual = diasMap[diaSemana] || 'desconocido'
+  
+  console.log('DEBUG activePromociones - Cliente seleccionado:', selectedClient.value ? selectedClient.value.nombre : 'Público', 'ID:', selectedClient.value?.id_cliente)
+  console.log('DEBUG activePromociones - Todas las promos:', promociones.value.map(p => ({ 
+    nombre: p.nombre, 
+    activo: p.activo, 
+    solo_clientes: p.solo_clientes, 
+    clientes: p.clientes,
+    clientesLength: p.clientes?.length,
+    hora_inicio: p.hora_inicio,
+    hora_fin: p.hora_fin,
+    dias_aplicables: p.dias_aplicables
+  })))
+  
+  return promociones.value.filter(p => {
+    // Solo activas
+    if (p.activo === false) {
+      console.log('DEBUG - Promo excluded: no activa', p.nombre)
+      return false
+    }
+    
+    // Si tiene clientes específicos, verificar que el cliente seleccionado esté en la lista
+    if (p.clientes && p.clientes.length > 0) {
+      console.log('DEBUG - Promo tiene clientes específicos:', p.nombre, 'clientes:', p.clientes, 'selectedClient ID:', selectedClient.value?.id_cliente)
+      if (!selectedClient.value) {
+        console.log('DEBUG - Promo excluded: cliente específico pero nadie seleccionado', p.nombre)
+        return false
+      }
+      if (!p.clientes.includes(selectedClient.value.id_cliente)) {
+        console.log('DEBUG - Promo excluded: cliente no está en lista específica', p.nombre)
+        return false
+      }
+    }
+    
+    // Si solo es para clientes registrados (no específicos)
+    if (p.solo_clientes && (!p.clientes || p.clientes.length === 0)) {
+      console.log('DEBUG - Promo solo_clientes sin clientes específicos:', p.nombre, 'solo_clientes:', p.solo_clientes)
+      if (!selectedClient.value) {
+        console.log('DEBUG - Promo excluded: solo clientes pero nadie seleccionado', p.nombre)
+        return false
+      }
+    }
+    
+    // Verificar horario
+    if (p.hora_inicio && p.hora_fin) {
+      const horaInicio = (p.hora_inicio || '').toString().split(':')
+      const horaFin = (p.hora_fin || '').toString().split(':')
+      const minutosInicio = parseInt(horaInicio[0] || '0') * 60 + parseInt(horaInicio[1] || '0')
+      const minutosFin = parseInt(horaFin[0] || '0') * 60 + parseInt(horaFin[1] || '0')
+      if (horaActual < minutosInicio || horaActual >= minutosFin) {
+        console.log('DEBUG - Promo excluded: fuera de horario', p.nombre, horaActual, minutosInicio, minutosFin)
+        return false
+      }
+    }
+    
+    // Verificar días - normalizar a minúsculas
+    if (p.dias_aplicables && Array.isArray(p.dias_aplicables) && p.dias_aplicables.length > 0) {
+      const diasLower = p.dias_aplicables.map((d: string) => d.toLowerCase().replace(/á/g,'a').replace(/é/g,'e').replace(/í/g,'i').replace(/ó/g,'o').replace(/ú/g,'u'))
+      if (!diasLower.includes(diaActual)) {
+        console.log('DEBUG - Promo excluded: día no aplica', p.nombre, 'diaActual:', diaActual, 'dias:', diasLower)
+        return false
+      }
+    }
+    
+    console.log('DEBUG - Promo included:', p.nombre)
+    return true
+  })
+})
 
 const packageExtraPrice = computed(() => {
   if (!selectedPackage.value) return 0
@@ -404,6 +635,71 @@ const packageExtraPrice = computed(() => {
     productos.forEach(p => { extra += p.precio_adicional })
   })
   return extra
+})
+
+interface CartDisplayItem {
+  cartId: number
+  productId: number
+  name: string
+  qty: number
+  basePrice: number
+  modifiers: IngredienteOpcion[]
+  unitTotal: number
+  note?: string
+  isPackage?: boolean
+  packageId?: number
+  packageSelections?: { id_grupo: number; id_producto: number; nombre: string }[]
+  extraPrice?: number
+  categoria?: string
+  promoGroupId?: number
+  promoGroupName?: string
+  isPromoItem?: boolean
+  isFree?: boolean
+  packageProductModifiers?: Record<number, IngredienteOpcion[]>
+}
+
+interface CartDisplayGroup {
+  type: 'group'
+  promoGroupId: number
+  promoGroupName: string
+  items: CartDisplayItem[]
+}
+
+interface CartDisplaySingle {
+  type: 'single'
+  item: CartDisplayItem
+}
+
+type CartDisplayEntry = CartDisplayGroup | CartDisplaySingle
+
+const cartDisplay = computed((): CartDisplayEntry[] => {
+  const result: CartDisplayEntry[] = []
+  const processedGroupIds = new Set<number>()
+
+  for (const item of cart.value) {
+    if (item.promoGroupId && !processedGroupIds.has(item.promoGroupId)) {
+      const groupItems = cart.value.filter(i => i.promoGroupId === item.promoGroupId)
+      const maxTotal = Math.max(...groupItems.map(i => i.unitTotal))
+      
+      const displayItems: CartDisplayItem[] = groupItems.map(i => ({
+        ...i,
+        isFree: i.unitTotal !== maxTotal,
+        unitTotal: i.unitTotal === maxTotal ? i.unitTotal : 0
+      }))
+      
+      result.push({
+        type: 'group',
+        promoGroupId: item.promoGroupId!,
+        promoGroupName: item.promoGroupName || '',
+        items: displayItems
+      })
+      processedGroupIds.add(item.promoGroupId)
+    } else if (!item.promoGroupId) {
+      result.push({ type: 'single', item: { ...item, isFree: false } })
+    }
+  }
+
+  return result
 })
 
 // Descuentos - el precio ya incluye IVA, calculamos la base sin IVA
@@ -449,14 +745,14 @@ const handleProductClick = async (product: Producto) => {
   const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${product.id_producto}`)
   console.log('🍔 [DEBUG] Ingredientes response for product', product.id_producto, ':', JSON.stringify(res, null, 2))
   
-  const opcionesActivas = (res.datos || []).filter((i: any) => i.activo).map((i: any) => ({
+  const todasOpciones = (res.datos || []).map((i: any) => ({
     ...i,
     precio_modificador: Number(i.precio_modificador || 0),
-    seleccionado: i.es_obligatorio
+    seleccionado: true
   }))
 
-  if (opcionesActivas.length > 0) {
-    currentOptions.value = opcionesActivas
+  if (todasOpciones.length > 0) {
+    currentOptions.value = todasOpciones
     selectedProductForOptions.value = product
     showOptionsModal.value = true
   } else {
@@ -468,15 +764,60 @@ const handleProductClick = async (product: Producto) => {
 const confirmOptionsAndAddToCart = () => {
   if (!selectedProductForOptions.value) return
   const selectedModifiers = currentOptions.value.filter(o => o.seleccionado)
-  addDirectlyToCart(selectedProductForOptions.value, selectedModifiers)
+  
+  if (isPromoContext.value) {
+    promoItemsWithModifiers.value.push({
+      product: selectedProductForOptions.value,
+      modifiers: [...selectedModifiers]
+    })
+    displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
+    isPromoContext.value = false
+    promoContextProduct.value = null
+    
+    showOptionsModal.value = false
+    selectedProductForOptions.value = null
+    currentOptions.value = []
+    showPromoModal.value = true
+  } else if (editingCartItemId.value !== null) {
+    const cartItem = cart.value.find(item => item.cartId === editingCartItemId.value)
+    if (cartItem) {
+      const modsPrice = selectedModifiers.reduce((acc, mod) => acc + mod.precio_modificador, 0)
+      cartItem.modifiers = [...selectedModifiers]
+      cartItem.unitTotal = cartItem.basePrice + modsPrice
+      displayToast('Ingredientes actualizados', 'success')
+    }
+    editingCartItemId.value = null
+    showOptionsModal.value = false
+    selectedProductForOptions.value = null
+    currentOptions.value = []
+  } else {
+    addDirectlyToCart(selectedProductForOptions.value, selectedModifiers)
+    showOptionsModal.value = false
+    selectedProductForOptions.value = null
+    currentOptions.value = []
+  }
+}
+
+const closeOptionsModal = () => {
+  if (pendingPackageContext) {
+    packageProductModifiers.value = {}
+    currentPendingPackageSelections.value = []
+    pendingPackageContext = null
+    displayToast('Paquete cancelado', 'warning')
+  }
   showOptionsModal.value = false
   selectedProductForOptions.value = null
   currentOptions.value = []
+  editingCartItemId.value = null
+  isPromoContext.value = false
+  promoContextProduct.value = null
 }
 
-const addDirectlyToCart = (product: Producto, modifiers: IngredienteOpcion[]) => {
+const isEditingCartItem = computed(() => editingCartItemId.value !== null)
+
+const addDirectlyToCart = (product: Producto, modifiers: IngredienteOpcion[], overridePrice?: number | null) => {
   const modsPrice = modifiers.reduce((acc, mod) => acc + mod.precio_modificador, 0)
-  const finalUnitPrice = product.precio_base + modsPrice
+  const finalUnitPrice = overridePrice !== undefined && overridePrice !== null ? overridePrice + modsPrice : product.precio_base + modsPrice
 
   const existing = cart.value.find(item => {
     if (item.productId !== product.id_producto || item.isPackage) return false
@@ -505,13 +846,62 @@ const addDirectlyToCart = (product: Producto, modifiers: IngredienteOpcion[]) =>
   displayToast(`${product.nombre_producto} agregado`, 'success')
 }
 
+const openEditCartItemModal = async (cartItem: CartItem) => {
+  try {
+    const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${cartItem.productId}`)
+    const opcionesActivas = (res.datos || []).filter((i: any) => i.activo)
+    
+    if (opcionesActivas.length > 0) {
+      const currentModIds = new Set(cartItem.modifiers.map(m => m.id_ingrediente))
+      currentOptions.value = opcionesActivas.map((i: any) => ({
+        ...i,
+        precio_modificador: Number(i.precio_modificador || 0),
+        seleccionado: currentModIds.has(i.id_ingrediente)
+      }))
+      selectedProductForOptions.value = {
+        id_producto: cartItem.productId,
+        nombre_producto: cartItem.name,
+        precio_base: cartItem.basePrice,
+        categoria: cartItem.categoria || '',
+        url_imagen: '',
+        id_zona: null,
+        zona: '',
+        disponibilidad: true
+      }
+      editingCartItemId.value = cartItem.cartId
+      showOptionsModal.value = true
+    } else {
+      displayToast('Este producto no tiene ingredientes configurados', 'warning')
+    }
+  } catch (e) {
+    console.warn('Error al cargar opciones', e)
+    displayToast('Error al cargar ingredientes', 'error')
+  }
+}
+
 // ── PAQUETES ────────────────────────────────────────────
 const openPackageModal = (paquete: Paquete) => {
-  selectedPackage.value = paquete
+  const filteredGrupos = paquete.grupos.map(g => ({
+    ...g,
+    productos: g.productos.filter(p => {
+      const product = allProducts.value.find(ap => ap.id_producto === p.id_producto)
+      return product && 
+             product.disponibilidad !== false && 
+             productosEnMenusActivos.value.includes(p.id_producto)
+    })
+  })).filter(g => g.productos.length > 0)
+
+  selectedPackage.value = { ...paquete, grupos: filteredGrupos }
   packageSelections.value = new Map()
   packageValidationError.value = ''
+  packageProductModifiers.value = {}
+  currentPendingPackageSelections.value = []
   showPackageModal.value = true
 }
+
+const packageProductModifiers = ref<Record<number, IngredienteOpcion[]>>({})
+const currentPendingPackageSelections = ref<{ id_grupo: number; producto: PaqueteProducto }[]>([])
+let pendingPackageContext: { id_grupo: number; producto: PaqueteProducto } | null = null
 
 const togglePackageProduct = (grupoId: number, producto: PaqueteProducto) => {
   const current = packageSelections.value.get(grupoId) || []
@@ -548,16 +938,86 @@ const validatePackageSelection = (): boolean => {
   return true
 }
 
-const addPackageToCart = () => {
+const addPackageToCart = async () => {
   if (!selectedPackage.value || !validatePackageSelection()) return
   
+  const allSelections: { id_grupo: number; producto: PaqueteProducto }[] = []
+  
+  packageSelections.value.forEach((productos, grupoId) => {
+    productos.forEach(p => {
+      allSelections.push({ id_grupo: Number(grupoId), producto: p })
+    })
+  })
+
+  packageProductModifiers.value = {}
+  currentPendingPackageSelections.value = allSelections
+  showPackageModal.value = false
+
+  await processNextPackageProduct()
+}
+
+const processNextPackageProduct = async () => {
+  if (currentPendingPackageSelections.value.length === 0) {
+    finalizePackageAdd()
+    return
+  }
+
+  const current = currentPendingPackageSelections.value[0]!
+  const producto = allProducts.value.find(p => p.id_producto === current.producto.id_producto)
+  
+  if (!producto) {
+    currentPendingPackageSelections.value.shift()
+    await processNextPackageProduct()
+    return
+  }
+
+  isPromoContext.value = false
+  isLoadingOptions.value = true
+  const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${producto.id_producto}`)
+  
+  const todasOpciones = (res.datos || []).map((i: any) => ({
+    ...i,
+    precio_modificador: Number(i.precio_modificador || 0),
+    seleccionado: true
+  }))
+
+  if (todasOpciones.length > 0) {
+    currentOptions.value = todasOpciones
+    selectedProductForOptions.value = producto
+    pendingPackageContext = { ...current }
+    showOptionsModal.value = true
+  } else {
+    packageProductModifiers.value[current.producto.id_producto] = []
+    currentPendingPackageSelections.value.shift()
+    await processNextPackageProduct()
+  }
+  isLoadingOptions.value = false
+}
+
+const confirmPackageOptions = async () => {
+  if (!selectedProductForOptions.value || !pendingPackageContext) return
+  
+  const selectedModifiers = currentOptions.value.filter(o => o.seleccionado)
+  packageProductModifiers.value[pendingPackageContext.producto.id_producto] = selectedModifiers
+
+  showOptionsModal.value = false
+  selectedProductForOptions.value = null
+  currentOptions.value = []
+  pendingPackageContext = null
+
+  currentPendingPackageSelections.value.shift()
+  await processNextPackageProduct()
+}
+
+const finalizePackageAdd = () => {
+  if (!selectedPackage.value) return
+
   const selections: { id_grupo: number; id_producto: number; nombre: string }[] = []
   let extraPrice = 0
   
   packageSelections.value.forEach((productos, grupoId) => {
-    const grupo = selectedPackage.value!.grupos.find(g => g.id_grupo === grupoId)
     productos.forEach(p => {
-      selections.push({ id_grupo: grupoId, id_producto: p.id_producto, nombre: p.nombre_producto })
+      selections.push({ id_grupo: Number(grupoId), id_producto: p.id_producto, nombre: p.nombre_producto })
       extraPrice += p.precio_adicional
     })
   })
@@ -575,12 +1035,14 @@ const addPackageToCart = () => {
     isPackage: true,
     packageId: selectedPackage.value.id_paquete,
     packageSelections: selections,
-    extraPrice: extraPrice
+    extraPrice: extraPrice,
+    packageProductModifiers: { ...packageProductModifiers.value }
   })
 
   playSound('added')
   displayToast(`${selectedPackage.value.nombre_paquete} agregado`, 'success')
-  showPackageModal.value = false
+  packageProductModifiers.value = {}
+  currentPendingPackageSelections.value = []
 }
 
 // ── RFID ────────────────────────────────────────────────
@@ -643,117 +1105,194 @@ const applyClientPromotions = () => {
   appliedPromociones.value = []
 }
 
-const applyAutomaticPromotions = () => {
-  const today = new Date()
-  const currentHour = today.getHours()
-  const dayOfWeek = today.getDay() // 0 = domingo, 1 = lunes, 2 = martes, ..., 6 = sábado
+// ── MODAL DE PROMOCIÓN ─────────────────────────────────────
+const openPromoModal = async (promo: Promocion) => {
+  selectedPromo.value = promo
+  promoSelectedProducts.value = {}
+  promoItemsWithModifiers.value = []
   
-  console.log('🏷️ Debug promo - dayOfWeek:', dayOfWeek, 'Promociones activas:', activePromociones.value.map(p => ({ nombre: p.nombre, dias: p.dias, tipo: p.tipo })))
-  
-  const todayPromociones: { id_promocion: number; nombre: string; tipo: string; valor: number }[] = []
-  const newItemPromociones: Record<number, { id_promocion: number; nombre: string; tipo: string; valor: number }[]> = {}
-  
-  // Productos normales (no paquetes) en el carrito
-  const productosNormales = cart.value.filter(item => !item.isPackage)
-  
-  // Para 2x1: contar solo bebidas (considerando cantidad total)
-  const bebidasEnCarrito = productosNormales.filter(i => i.categoria?.toLowerCase().includes('bebidas'))
-  const totalBebidas = bebidasEnCarrito.reduce((acc, item) => acc + item.qty, 0)
-  const tieneBebidas = totalBebidas >= 2
-  console.log('🏷️ Debug promo - totalBebidas:', totalBebidas)
-  console.log('🏷️ Debug promo - productosNormales:', productosNormales.map(i => ({ name: i.name, categoria: i.categoria })), 'bebidas:', bebidasEnCarrito.length, 'tieneBebidas:', tieneBebidas)
-  
-  for (const promo of activePromociones.value) {
-    // Verificar si es para clientes específicos
-    if (promo.solo_clientes && !selectedClient.value) continue
-    
-    // Verificar horario si aplica
-    const horaInicio = String(promo.hora_inicio ?? '')
-    const horaFin = String(promo.hora_fin ?? '')
-    if (horaInicio.length > 0) {
-      const h = horaInicio.split(':')[0]
-      if (h && currentHour < parseInt(h)) continue
-    }
-    if (horaFin.length > 0) {
-      const h = horaFin.split(':')[0]
-      if (h && currentHour >= parseInt(h)) continue
-    }
-    
-    // Verificar días de la semana si aplica (puede ser array ["Martes","Sábado"] o string "martes,sabado")
-    const diasAplicables = (promo as any).dias_aplicables ?? promo.dias
-    if (diasAplicables) {
-      let diasPermitidos: string[] = []
-      
-      if (Array.isArray(diasAplicables)) {
-        // Formato array: ["Martes","Sábado"]
-        diasPermitidos = diasAplicables.map((d: string) => d.toLowerCase())
-      } else if (typeof diasAplicables === 'string') {
-        // Formato string: "martes,sabado"
-        diasPermitidos = diasAplicables.toLowerCase().split(',').map(d => d.trim())
-      }
-      
-      const diasMap: Record<number, string> = {
-        0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles', 
-        4: 'jueves', 5: 'viernes', 6: 'sabado'
-      }
-      const diaActual = diasMap[dayOfWeek]
-      if (!diasPermitidos.includes(diaActual as string)) continue
-    }
-    
-    // Para 2x1 (bogo) solo aplicar si hay al menos 2 bebidas
-    if (promo.tipo === 'bogo') {
-      if (!tieneBebidas) continue // No hay suficientes bebidas, saltamos esta promoción
-    }
-    
-    // Aplicar a cada producto normal
-    let promoAplicada = false
-    for (const item of productosNormales) {
-      // Para 2x1, verificar si es bebida
-      if (promo.tipo === 'bogo') {
-        const esBebida = item.categoria?.toLowerCase().includes('bebidas')
-        if (!esBebida) continue // Solo aplicar a bebidas
-      }
-      
-      if (!newItemPromociones[item.cartId]) {
-        newItemPromociones[item.cartId] = []
-      }
-      
-      // Para 2x1, aplicar solo al primer producto
-      if (promo.tipo === 'bogo') {
-        const index = productosNormales.findIndex(p => p.cartId === item.cartId)
-        if (index === 0) { // Solo al primer item
-          newItemPromociones[item.cartId]?.push({
-            id_promocion: promo.id_promocion,
-            nombre: promo.nombre,
-            tipo: promo.tipo,
-            valor: promo.valor
-          })
-          promoAplicada = true
-        }
-      } else {
-        newItemPromociones[item.cartId]?.push({
-          id_promocion: promo.id_promocion,
-          nombre: promo.nombre,
-          tipo: promo.tipo,
-          valor: promo.valor
-        })
-        promoAplicada = true
-      }
-    }
-    
-    // Solo agregar la promoción si realmente se aplicó a algún producto
-    if (promoAplicada && !todayPromociones.find(p => p.id_promocion === promo.id_promocion)) {
-      todayPromociones.push({
-        id_promocion: promo.id_promocion,
-        nombre: promo.nombre,
-        tipo: promo.tipo,
-        valor: promo.valor
-      })
-    }
+  const promoProds = promo.productos || []
+  if (promoProds.length > 0) {
+    promoProductos.value = allProducts.value.filter(p => 
+      promoProds.includes(p.id_producto) && 
+      p.disponibilidad !== false && 
+      productosEnMenusActivos.value.includes(p.id_producto)
+    )
+  } else {
+    promoProductos.value = allProducts.value.filter(p => 
+      p.disponibilidad !== false && 
+      productosEnMenusActivos.value.includes(p.id_producto)
+    )
   }
   
-  itemPromociones.value = newItemPromociones
-  appliedPromociones.value = todayPromociones
+  showPromoModal.value = true
+}
+
+const openPromoProductOptions = async (product: Producto) => {
+  if (promoItemsWithModifiers.value.length >= 2) {
+    displayToast('Máximo 2 productos por promoción 2x1', 'warning')
+    return
+  }
+
+  isPromoContext.value = true
+  promoContextProduct.value = product
+  showPromoModal.value = false
+
+  isLoadingOptions.value = true
+  const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${product.id_producto}`)
+  
+  const todasOpciones = (res.datos || []).map((i: any) => ({
+    ...i,
+    precio_modificador: Number(i.precio_modificador || 0),
+    seleccionado: true
+  }))
+
+  if (todasOpciones.length > 0) {
+    currentOptions.value = todasOpciones
+    selectedProductForOptions.value = product
+    showOptionsModal.value = true
+  } else {
+    promoItemsWithModifiers.value.push({ product, modifiers: [] })
+    displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
+  }
+  isLoadingOptions.value = false
+}
+
+const togglePromoProduct = (productId: number) => {
+  const producto = promoProductos.value.find(p => p.id_producto === productId)
+  if (!producto) return
+
+  openPromoProductOptions(producto)
+}
+
+const confirmPromoSelection = () => {
+  if (!selectedPromo.value) return
+  
+  if (promoItemsWithModifiers.value.length === 0) {
+    displayToast('Selecciona al menos un producto', 'warning')
+    return
+  }
+
+  const promo = selectedPromo.value
+  const promoCartItems: CartItem[] = []
+
+  if (promo.tipo === 'bogo') {
+    const items = promoItemsWithModifiers.value
+    if (items.length === 0) {
+      displayToast('Selecciona al menos un producto', 'warning')
+      return
+    }
+    const item0 = items[0]!
+    const price1 = item0.product.precio_base + item0.modifiers.reduce((acc, m) => acc + m.precio_modificador, 0)
+    const price2 = items[1] ? items[1].product.precio_base + items[1].modifiers.reduce((acc, m) => acc + m.precio_modificador, 0) : 0
+    
+    const maxPrice = Math.max(price1, price2)
+    const minPrice = Math.min(price1, price2)
+    const promoGroupId = Date.now()
+    const promoGroupName = promo.nombre
+
+    const item1: CartItem = {
+      cartId: promoGroupId,
+      productId: item0.product.id_producto,
+      name: item0.product.nombre_producto,
+      qty: 1,
+      basePrice: item0.product.precio_base,
+      modifiers: item0.modifiers,
+      unitTotal: maxPrice,
+      categoria: item0.product.categoria,
+      promoGroupId: promoGroupId,
+      promoGroupName: promoGroupName,
+      isPromoItem: true
+    }
+    promoCartItems.push(item1)
+
+    if (items[1]) {
+      const item1 = items[1]!
+      const item2: CartItem = {
+        cartId: promoGroupId + 1,
+        productId: item1.product.id_producto,
+        name: item1.product.nombre_producto,
+        qty: 1,
+        basePrice: item1.product.precio_base,
+        modifiers: item1.modifiers,
+        unitTotal: minPrice,
+        categoria: item1.product.categoria,
+        promoGroupId: promoGroupId,
+        promoGroupName: promoGroupName,
+        isPromoItem: true
+      }
+      promoCartItems.push(item2)
+    }
+
+    for (const item of promoCartItems) {
+      cart.value.push(item)
+    }
+    playSound('added')
+  } else {
+    const promoGroupId = Date.now()
+    const itemsArray = promoItemsWithModifiers.value
+    for (let i = 0; i < itemsArray.length; i++) {
+      const item = itemsArray[i]!
+      const modsPrice = item.modifiers.reduce((acc, m) => acc + m.precio_modificador, 0)
+      let finalPrice = item.product.precio_base + modsPrice
+      
+      if (promo.tipo === 'porcentaje') {
+        finalPrice = (item.product.precio_base + modsPrice) * (1 - promo.valor / 100)
+      } else if (promo.tipo === 'monto') {
+        finalPrice = Math.max(0, item.product.precio_base + modsPrice - promo.valor)
+      }
+      
+      const cartItem: CartItem = {
+        cartId: promoGroupId + i,
+        productId: item.product.id_producto,
+        name: item.product.nombre_producto,
+        qty: 1,
+        basePrice: item.product.precio_base,
+        modifiers: item.modifiers,
+        unitTotal: finalPrice,
+        categoria: item.product.categoria,
+        promoGroupId: promoGroupId,
+        promoGroupName: promo.nombre,
+        isPromoItem: true
+      }
+      cart.value.push(cartItem)
+    }
+  }
+
+  appliedPromociones.value.push({
+    id_promocion: promo.id_promocion,
+    nombre: promo.nombre,
+    tipo: promo.tipo,
+    valor: promo.valor
+  })
+
+  promoItemsWithModifiers.value = []
+  showPromoModal.value = false
+  selectedPromo.value = null
+}
+
+const removePromoFromCart = (idPromo: number) => {
+  appliedPromociones.value = appliedPromociones.value.filter(p => p.id_promocion !== idPromo)
+}
+
+const removeAppliedPromo = (idPromo: number) => {
+  const promo = appliedPromociones.value.find(p => p.id_promocion === idPromo)
+  if (promo) {
+    const groupName = promo.nombre
+    cart.value = cart.value.filter(item => item.promoGroupName !== groupName)
+  }
+  appliedPromociones.value = appliedPromociones.value.filter(p => p.id_promocion !== idPromo)
+  displayToast('Promoción eliminada', 'success')
+}
+
+const removePromoItem = (index: number) => {
+  promoItemsWithModifiers.value.splice(index, 1)
+  displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
+}
+
+const removePromoGroup = (promoGroupId: number) => {
+  cart.value = cart.value.filter(item => item.promoGroupId !== promoGroupId)
+  displayToast('Promoción eliminada', 'success')
 }
 
 // ── CARRITO ─────────────────────────────────────────────
@@ -800,35 +1339,140 @@ const processPay = async () => {
   isProcessingPayment.value = true
   
   try {
-    // Por ahora simulando - cuando endpoints estén disponibles:
-    // 1. POST /api/ordenes/agregar
-    // 2. POST /api/ordenes/detalles/agregar para cada item
-    // 3. POST /api/ordenes/pagos/agregar
+    const numeroOrden = `ORD-${Date.now()}`
     
-    const payload = {
-      id_cliente: selectedClient.value?.id_cliente || null,
-      metodo_pago: selectedPayment.value,
-      subtotal: subtotalConIva.value,
-      descuento: totalDescuentos.value,
-      impuestos: iva.value,
-      total: total.value,
-      notas: orderNote.value,
-      productos: cart.value.map(item => ({
-        ...item,
-        nota: itemNotes.value[item.cartId] || ''
-      })),
-      promociones_aplicadas: appliedPromociones.value
+    const ordenRes = await fetchConToken('/ordenes/agregar', {
+      method: 'POST',
+      body: JSON.stringify({
+        numero_orden: numeroOrden,
+        subtotal: subtotalSinIva.value,
+        total: total.value,
+        id_cliente: selectedClient.value?.id_cliente || null,
+        tipo_orden: 'local',
+        mesa_numero: null,
+        descuento: totalDescuentos.value,
+        impuestos: iva.value,
+        notas: orderNote.value
+      })
+    })
+
+    if (ordenRes.status !== 'ok') {
+      throw new Error(ordenRes.mensaje || 'Error al crear la orden')
     }
+
+    const idOrden = ordenRes.id_orden
+    console.log('📤 [DEBUG] Orden creada:', { numeroOrden, idOrden })
+
+    for (const item of cart.value) {
+      console.log('📤 [DEBUG] Agregando detalle:', { item: item.name, qty: item.qty, price: item.unitTotal })
+      
+      const detalleRes = await fetchConToken('/ordenes/detalles/agregar', {
+        method: 'POST',
+        body: JSON.stringify({
+          id_orden: idOrden,
+          cantidad: item.qty,
+          precio_unitario: item.unitTotal / 1.16,
+          subtotal: item.qty * (item.unitTotal / 1.16),
+          id_producto: item.isPackage ? null : item.productId,
+          id_paquete: item.isPackage ? item.packageId : null,
+          descuento: 0,
+          id_promocion: item.promoGroupId ? item.promoGroupId : null,
+          id_zona: null,
+          notas: itemNotes.value[item.cartId] || null
+        })
+      })
+
+      console.log('📥 [DEBUG] Detalle response:', detalleRes)
+
+      if (detalleRes.status !== 'ok') {
+        throw new Error(detalleRes.mensaje || 'Error al agregar item')
+      }
+
+      const idDetalle = detalleRes.id_orden_detalle
+
+      if (item.modifiers && item.modifiers.length > 0) {
+        console.log('📤 [DEBUG] Agregando modificadores para item:', item.name)
+        for (const mod of item.modifiers) {
+          console.log('   ➡️ Modificador:', { id_ingrediente: mod.id_ingrediente, nombre: mod.nombre_ingrediente, precio: mod.precio_modificador })
+          const modRes = await fetchConToken('/ordenes/detalles-modificadores/', {
+            method: 'POST',
+            body: JSON.stringify({
+              id_detalle: idDetalle,
+              id_ingrediente: mod.id_ingrediente,
+              accion: 'agregar',
+              precio: mod.precio_modificador || 0
+            })
+          })
+          console.log('   📥 Modificador response:', modRes)
+        }
+      }
+
+      if (item.isPackage && item.packageSelections && item.packageSelections.length > 0) {
+        console.log('📤 [DEBUG] Agregando selections de paquete:', item.packageSelections)
+        const packageMods = item.packageProductModifiers || {}
+        
+        for (const sel of item.packageSelections) {
+          console.log('   ➡️ Selección paquete:', { nombre: sel.nombre, id_grupo: sel.id_grupo, id_producto: sel.id_producto })
+          
+          const selRes = await fetchConToken('/ordenes/paquete-seleccion/agregar', {
+            method: 'POST',
+            body: JSON.stringify({
+              id_detalle: idDetalle,
+              id_grupo: sel.id_grupo,
+              id_producto: sel.id_producto,
+              cantidad: 1
+            })
+          })
+
+          console.log('   📥 Selección response:', selRes)
+
+          if (selRes.status !== 'ok') {
+            throw new Error(selRes.mensaje || 'Error al agregar selección de paquete')
+          }
+
+          const idSeleccion = selRes.id_seleccion
+
+          const modsProducto = packageMods[sel.id_producto] || []
+          if (modsProducto.length > 0) {
+            console.log('   📤 [DEBUG] Modificadores de selección:', modsProducto.map(m => m.nombre_ingrediente))
+            for (const mod of modsProducto) {
+              const modSelRes = await fetchConToken('/ordenes/detalles-modificadores/', {
+                method: 'POST',
+                body: JSON.stringify({
+                  id_detalle: idDetalle,
+                  id_ingrediente: mod.id_ingrediente,
+                  accion: 'agregar',
+                  precio: mod.precio_modificador || 0
+                })
+              })
+              console.log('   📥 Modificador selección response:', modSelRes)
+            }
+          }
+        }
+      }
+    }
+
+    console.log('📤 [DEBUG] Registrando pago:', { id_orden: idOrden, metodo: selectedPayment.value, monto: total.value })
     
-    console.log('Procesando orden:', payload)
-    
-    // Simular delay
-    await new Promise(r => setTimeout(r, 1500))
-    
+    const pagoRes = await fetchConToken('/ordenes/pagos/agregar', {
+      method: 'POST',
+      body: JSON.stringify({
+        id_orden: idOrden,
+        metodo: selectedPayment.value,
+        monto: total.value,
+        referencia: null
+      })
+    })
+
+    console.log('📥 [DEBUG] Pago response:', pagoRes)
+
+    if (pagoRes.status !== 'ok') {
+      throw new Error(pagoRes.mensaje || 'Error al registrar el pago')
+    }
+
     playSound('success')
-    displayToast('Orden procesada correctamente', 'success')
+    displayToast(`Orden ${numeroOrden} procesada correctamente`, 'success')
     
-    // Limpiar
     cart.value = []
     selectedClient.value = null
     rfidDetectedClient.value = null
@@ -839,9 +1483,10 @@ const processPay = async () => {
     clearSavedTicket()
     showConfirmModal.value = false
     
-  } catch (error) {
+  } catch (error: any) {
+    console.error('Error al procesar la orden:', error)
     playSound('error')
-    displayToast('Error al procesar la orden', 'error')
+    displayToast(error.message || 'Error al procesar la orden', 'error')
   } finally {
     isProcessingPayment.value = false
   }
@@ -987,12 +1632,14 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
             v-for="promo in activePromociones" 
             :key="promo.id_promocion" 
             class="product-card promo-card"
+            @click="openPromoModal(promo)"
           >
             <div class="product-emoji">🏷️</div>
             <span class="product-name">{{ promo.nombre }}</span>
             <span class="promo-badge" :class="promo.tipo">
               {{ promo.tipo === 'porcentaje' ? `-${promo.valor}%` : promo.tipo === 'monto' ? `-$${promo.valor}` : '2x1' }}
             </span>
+            <span class="promo-hint">Toca para aplicar</span>
           </div>
         </div>
       </section>
@@ -1010,6 +1657,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         <div v-if="appliedPromociones.length > 0" class="applied-promos">
           <div v-for="promo in appliedPromociones" :key="promo.id_promocion" class="promo-applied-tag">
             {{ promo.nombre }}
+            <button class="remove-promo-btn" @click="removeAppliedPromo(promo.id_promocion)" title="Eliminar promoción">✕</button>
           </div>
         </div>
 
@@ -1020,47 +1668,83 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
             <p>El ticket está vacío</p>
           </div>
 
-          <div v-for="item in cart" :key="item.cartId" class="cart-item">
-            <div class="item-info">
-              <span class="item-name">
-                {{ item.name }}
-                <span v-if="item.isPackage" class="badge-package">PAQUETE</span>
-              </span>
-              <span class="item-unit">${{ item.unitTotal.toFixed(2) }}</span>
-              <ul v-if="item.modifiers.length > 0" class="item-mods-list">
-                <li v-for="mod in item.modifiers" :key="mod.id_ingrediente">
-                  + {{ mod.nombre_ingrediente }} <span v-if="mod.precio_modificador > 0">(+${{mod.precio_modificador}})</span>
-                </li>
-              </ul>
-              <div v-if="itemPromociones[item.cartId]?.length" class="item-promos">
-                <span v-for="promo in itemPromociones[item.cartId]" :key="promo.id_promocion" class="promo-item-tag">
-                  {{ promo.tipo === 'porcentaje' ? `${promo.valor}%` : promo.tipo === 'bogo' ? '2x1' : promo.tipo === 'monto' ? `-$${promo.valor}` : promo.nombre }}
-                </span>
+          <template v-for="entry in cartDisplay" :key="entry.type === 'group' ? entry.promoGroupId : entry.item.cartId">
+            <!-- Grupo de promoción (recuadro) -->
+            <div v-if="entry.type === 'group'" class="promo-group-box">
+              <div class="promo-group-header">
+                <span class="promo-group-badge">{{ entry.promoGroupName }}</span>
+                <span class="promo-group-total">${{ entry.items.reduce((sum, i) => sum + i.unitTotal, 0).toFixed(2) }}</span>
               </div>
-              <div v-if="item.packageSelections?.length" class="package-selections">
-                <span v-for="sel in item.packageSelections" :key="sel.id_producto" class="sel-chip">
-                  {{ sel.nombre }}
-                </span>
+              <div v-for="item in entry.items" :key="item.cartId" class="cart-item promo-item">
+                <div class="item-info">
+                  <span class="item-name">
+                    {{ item.name }}
+                    <span v-if="item.isFree" class="badge-free">2x1</span>
+                  </span>
+                  <span class="item-unit" :class="{ 'price-free': item.isFree }">
+                    {{ item.isFree ? '$0.00' : '$' + item.unitTotal.toFixed(2) }}
+                  </span>
+                  <ul v-if="item.modifiers.length > 0" class="item-mods-list">
+                    <li v-for="mod in item.modifiers" :key="mod.id_ingrediente">
+                      + {{ mod.nombre_ingrediente }} <span v-if="mod.precio_modificador > 0">(+${{mod.precio_modificador}})</span>
+                    </li>
+                  </ul>
+                </div>
+                <div class="qty-controls">
+                  <button @click="updateQty(item.cartId, -1)">−</button>
+                  <span>{{ item.qty }}</span>
+                  <button @click="updateQty(item.cartId, 1)">+</button>
+                </div>
+                <div class="item-right">
+                  <span class="item-total">${{ (item.qty * item.unitTotal).toFixed(2) }}</span>
+                  <button class="edit-btn" @click="openEditCartItemModal(item)" title="Editar ingredientes">✏️</button>
+                  <button class="delete-btn" @click="removePromoGroup(entry.promoGroupId)">🗑️</button>
+                </div>
               </div>
-              <input 
-                v-model="itemNotes[item.cartId]"
-                type="text" 
-                class="item-note-input" 
-                placeholder="Nota: sin cebolla..."
-              />
             </div>
-            
-            <div class="qty-controls">
-              <button @click="updateQty(item.cartId, -1)">−</button>
-              <span>{{ item.qty }}</span>
-              <button @click="updateQty(item.cartId, 1)">+</button>
+
+            <!-- Item individual -->
+            <div v-else class="cart-item">
+              <div class="item-info">
+                <span class="item-name">
+                  {{ entry.item.name }}
+                  <span v-if="entry.item.isPackage" class="badge-package">PAQUETE</span>
+                </span>
+                <span class="item-unit">${{ entry.item.unitTotal.toFixed(2) }}</span>
+                <ul v-if="entry.item.modifiers.length > 0" class="item-mods-list">
+                  <li v-for="mod in entry.item.modifiers" :key="mod.id_ingrediente">
+                    + {{ mod.nombre_ingrediente }} <span v-if="mod.precio_modificador > 0">(+${{mod.precio_modificador}})</span>
+                  </li>
+                </ul>
+                <div v-if="entry.item.packageSelections?.length" class="package-selections">
+                  <span v-for="sel in entry.item.packageSelections" :key="sel.id_producto" class="sel-chip">
+                    {{ sel.nombre }}
+                    <template v-if="entry.item.packageProductModifiers">
+                      <span v-for="mod in (entry.item.packageProductModifiers[sel.id_producto] || [])" :key="mod.id_ingrediente" class="sel-mod">
+                        {{ mod.nombre_ingrediente }}
+                      </span>
+                    </template>
+                  </span>
+                </div>
+                <input 
+                  v-model="itemNotes[entry.item.cartId]"
+                  type="text" 
+                  class="item-note-input" 
+                  placeholder="Nota: sin cebolla..."
+                />
+              </div>
+              <div class="qty-controls">
+                <button @click="updateQty(entry.item.cartId, -1)">−</button>
+                <span>{{ entry.item.qty }}</span>
+                <button @click="updateQty(entry.item.cartId, 1)">+</button>
+              </div>
+              <div class="item-right">
+                <span class="item-total">${{ (entry.item.qty * entry.item.unitTotal).toFixed(2) }}</span>
+                <button class="edit-btn" @click="openEditCartItemModal(entry.item)" title="Editar ingredientes">✏️</button>
+                <button class="delete-btn" @click="removeFromCart(entry.item.cartId)">🗑️</button>
+              </div>
             </div>
-            
-            <div class="item-right">
-              <span class="item-total">${{ (item.qty * item.unitTotal).toFixed(2) }}</span>
-              <button class="delete-btn" @click="removeFromCart(item.cartId)">🗑️</button>
-            </div>
-          </div>
+          </template>
         </div>
         </div>
 
@@ -1112,8 +1796,13 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           </label>
         </div>
         <div class="modal-actions">
-          <button class="btn btn--secondary" @click="showOptionsModal = false">Cancelar</button>
-          <button class="btn btn--primary" @click="confirmOptionsAndAddToCart">Agregar</button>
+          <button class="btn btn--secondary" @click="closeOptionsModal">Cancelar</button>
+          <button v-if="pendingPackageContext" class="btn btn--primary" @click="confirmPackageOptions">
+            Siguiente
+          </button>
+          <button v-else class="btn btn--primary" @click="confirmOptionsAndAddToCart">
+            {{ isEditingCartItem ? 'Actualizar' : 'Agregar' }}
+          </button>
         </div>
       </div>
     </div>
@@ -1151,6 +1840,65 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         <div class="modal-actions">
           <button class="btn btn--secondary" @click="showPackageModal = false">Cancelar</button>
           <button class="btn btn--primary" @click="addPackageToCart">Agregar Paquete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: Promo -->
+    <div v-if="showPromoModal && selectedPromo" class="modal-overlay" @click.self="showPromoModal = false">
+      <div class="modal-content promo-modal">
+        <div class="modal-header">
+          <h3>{{ selectedPromo.nombre }}</h3>
+          <p class="promo-desc">{{ selectedPromo.descripcion }}</p>
+          <p class="promo-value">
+            {{ selectedPromo.tipo === 'porcentaje' ? `-${selectedPromo.valor}%` : selectedPromo.tipo === 'monto' ? `-$${selectedPromo.valor}` : '2x1 (Llévate 2)' }}
+          </p>
+          <p class="promo-limit">Items seleccionados {{ totalPromoSeleccionados }}/2</p>
+        </div>
+
+        <!-- Items seleccionados -->
+        <div v-if="promoItemsWithModifiers.length > 0" class="promo-selected-items">
+          <div v-for="(item, idx) in promoItemsWithModifiers" :key="idx" class="selected-item-card">
+            <div class="selected-item-info">
+              <span class="selected-item-name">{{ item.product.nombre_producto }}</span>
+              <span v-if="item.modifiers.length > 0" class="selected-item-mods">
+                {{ item.modifiers.map(m => m.nombre_ingrediente).join(', ') }}
+              </span>
+              <span v-else class="selected-item-mods">Sin modificaciones</span>
+            </div>
+            <button class="remove-item-btn" @click="removePromoItem(idx)">✕</button>
+          </div>
+        </div>
+
+        <div class="promo-products-list">
+          <div 
+            v-for="prod in promoProductos" 
+            :key="prod.id_producto"
+            class="promo-product-item"
+            :class="{ disabled: promoItemsWithModifiers.length >= 2 }"
+            @click="togglePromoProduct(prod.id_producto)"
+          >
+            <div class="promo-prod-info">
+              <span class="promo-prod-name">{{ prod.nombre_producto }}</span>
+              <span class="promo-prod-cat">{{ prod.categoria }}</span>
+            </div>
+            <div class="promo-prod-price">
+              <span class="original-price">${{ prod.precio_base.toFixed(2) }}</span>
+              <span v-if="selectedPromo.tipo === 'porcentaje'" class="disc-price">
+                ${{ (prod.precio_base * (1 - selectedPromo.valor / 100)).toFixed(2) }}
+              </span>
+              <span v-else-if="selectedPromo.tipo === 'monto'" class="disc-price">
+                ${{ Math.max(0, prod.precio_base - selectedPromo.valor).toFixed(2) }}
+              </span>
+              <span v-else class="disc-price">${{ prod.precio_base.toFixed(2) }} (x2)</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn--secondary" @click="showPromoModal = false">Cancelar</button>
+          <button class="btn btn--primary" @click="confirmPromoSelection" :disabled="totalPromoSeleccionados < 1">
+            Agregar ({{ totalPromoSeleccionados }})
+          </button>
         </div>
       </div>
     </div>
@@ -1281,7 +2029,9 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .btn-client-small { background: #fff; border: 1px solid #2563eb; color: #2563eb; border-radius: 16px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .applied-promos { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; background: #ecfdf5; border-bottom: 1px solid #d1fae5; }
-.promo-applied-tag { font-size: 11px; background: #10b981; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+.promo-applied-tag { display: flex; align-items: center; gap: 4px; font-size: 11px; background: #10b981; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+.remove-promo-btn { background: none; border: none; color: #fff; cursor: pointer; font-size: 10px; padding: 0 2px; opacity: 0.8; }
+.remove-promo-btn:hover { opacity: 1; }
 
 /* ── CART ITEMS ── */
 .cart-items { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -1293,8 +2043,16 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .item-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .item-name { font-size: 14px; font-weight: 600; color: #111827; display: flex; align-items: center; gap: 6px; }
 .badge-package { font-size: 9px; background: #f3f4f6; color: #6b7280; padding: 2px 4px; border-radius: 3px; font-weight: 700; }
+.badge-free { font-size: 9px; background: #fce7f3; color: #db2777; padding: 2px 4px; border-radius: 3px; font-weight: 700; }
 .item-unit { font-size: 12px; color: #6b7280; }
+.item-unit.price-free { color: #9ca3af; text-decoration: line-through; }
 .item-mods-list { margin: 2px 0 0 0; padding-left: 12px; font-size: 11px; color: #9ca3af; }
+
+.promo-group-box { border: 2px solid #fcd34d; border-radius: 10px; padding: 10px; margin-bottom: 8px; background: #fffbeb; }
+.promo-group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px dashed #fcd34d; }
+.promo-group-badge { font-size: 11px; font-weight: 700; background: #fcd34d; color: #92400e; padding: 3px 8px; border-radius: 4px; }
+.promo-group-total { font-size: 14px; font-weight: 700; color: #92400e; }
+.promo-item { border-bottom: 1px solid #fce7f3 !important; padding-bottom: 8px !important; margin-bottom: 4px !important; }
 .item-promos { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; padding-left: 12px; }
 .promo-item-tag { font-size: 10px; background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: 600; border: 1px solid #fcd34d; }
 .package-selections { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
@@ -1311,6 +2069,8 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .item-total { font-size: 15px; font-weight: 700; color: #111827; }
 .delete-btn { background: none; border: none; cursor: pointer; padding: 4px; font-size: 16px; opacity: 0.6; transition: opacity 0.2s; }
 .delete-btn:hover { opacity: 1; }
+.edit-btn { background: none; border: none; cursor: pointer; padding: 4px; font-size: 14px; opacity: 0.6; transition: opacity 0.2s; }
+.edit-btn:hover { opacity: 1; }
 
 /* ── TOTALS ── */
 .cart-totals { padding: 16px; background: #f9fafb; display: flex; flex-direction: column; gap: 8px; }
@@ -1365,6 +2125,31 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .product-chip span { font-size: 10px; opacity: 0.8; }
 .validation-error { color: #dc2626; font-size: 13px; font-weight: 600; padding: 10px; background: #fef2f2; border-radius: 8px; }
 .extra-price { font-size: 14px; font-weight: 600; color: #16a34a; text-align: right; padding: 8px 0; }
+
+.promo-modal { max-width: 400px; }
+.promo-desc { font-size: 13px; color: #6b7280; margin: 4px 0; }
+.promo-value { font-size: 24px; font-weight: 700; color: #16a34a; margin: 8px 0; }
+.promo-limit { font-size: 12px; color: #6b7280; margin-bottom: 12px; }
+
+.promo-selected-items { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 10px; background: #ecfdf5; border: 2px solid #10b981; border-radius: 8px; }
+.selected-item-card { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #fff; border: 1px solid #d1fae5; border-radius: 6px; }
+.selected-item-info { display: flex; flex-direction: column; gap: 2px; }
+.selected-item-name { font-size: 14px; font-weight: 600; color: #111827; }
+.selected-item-mods { font-size: 11px; color: #6b7280; }
+.remove-item-btn { background: none; border: none; color: #dc2626; font-size: 16px; cursor: pointer; padding: 4px 8px; }
+
+.promo-products-list { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.promo-product-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #f9fafb; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+.promo-product-item:hover { border-color: #002D72; }
+.promo-product-item.selected { border-color: #16a34a; background: #ecfdf5; }
+.promo-product-item.disabled { opacity: 0.5; cursor: not-allowed; }
+.promo-prod-info { display: flex; flex-direction: column; }
+.promo-prod-name { font-size: 14px; font-weight: 600; color: #111827; }
+.promo-prod-cat { font-size: 12px; color: #6b7280; }
+.promo-prod-price { display: flex; flex-direction: column; align-items: flex-end; }
+.original-price { font-size: 12px; color: #9ca3af; text-decoration: line-through; }
+.disc-price { font-size: 16px; font-weight: 700; color: #16a34a; }
+.promo-hint { font-size: 10px; color: #9ca3af; display: block; margin-top: 4px; }
 
 .modal-actions { display: flex; gap: 12px; justify-content: flex-end; border-top: 1px solid #e5e7eb; padding-top: 16px; }
 

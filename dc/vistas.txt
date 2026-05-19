@@ -1,0 +1,32 @@
+v_categoria: id_categoria, nombre_cat, descripcion_cat
+v_cliente_beneficio: id_cliente_beneficio, id_cliente, nombre_cliente, id_tipo_beneficio, nombre_beneficio, cantidad_disponible, cantidad_usada, fecha_inicio, fecha_fin, dias_aplica, activo
+v_clientes_activos: id_cliente, nombre, email, teléfono, codigo_rfid, activo
+v_ingredientes: id, ingrediente, tipo, precio, estado
+v_inventario: id_inventario, id_ingrediente, nombre_ingrediente, cantidad_actual, cantidad_minima, unidad, fecha_actualizacion, activo, estado_stock
+v_inventario_movimientos: id_movimiento, id_inventario, id_ingrediente, nombre_ingrediente, tipo_movimiento, cantidad, motivo, id_usuario, nombre_usuario, fecha_movimiento, activo
+v_menu_productos_activos: id_menu, nombre_menu, id_producto, nombre_producto
+v_orden_completa: id_orden, numero_orden, usuario, cliente, id_orden_detalle, nombre_producto, nombre_paquete, cantidad, precio_unitario, subtotal, estado_preparacion, nombre_ingrediente, total, estado_orden, estado_pago, fecha_creacion
+v_orden_detalles: id_orden_detalle, id_orden, numero_orden, id_producto, nombre_producto, id_paquete, nombre_paquete, cantidad, precio_unitario, descuento_aplicado, subtotal, id_promocion, nombre_promocion, estado_preparacion, id_zona, nombre_zona, notas_especiales
+v_orden_detalles_cocina: id_orden_detalle, id_orden, numero_orden, id_producto, nombre_producto, id_paquete, nombre_paquete, cantidad, precio_unitario, descuento_aplicado, subtotal, id_promocion, nombre_promocion, estado_preparacion, id_zona, nombre_zona, notas_especiales
+v_orden_modificadores: id_detalle_modificador, id_orden_detalle, numero_orden, nombre_producto, id_ingrediente, nombre_ingrediente, accion, precio_modificador
+v_orden_pagos: id_pago, id_orden, numero_orden, metodo_pago, monto_pagado, referencia, fecha_pago, id_usuario, nombre_usuario, activo
+v_orden_paquete_selecciones: id_seleccion, id_orden_detalle, numero_orden, id_paquete, nombre_paquete, id_paquete_grupo, nombre_grupo, id_producto, nombre_producto, cantidad
+v_ordenes: id_orden, numero_orden, usuario, cliente, tipo_orden, mesa_numero, subtotal, descuento, impuestos, total, estado_orden, estado_pago, metodo_pago, notas_orden, fecha_creacion, fecha_actualizacion, fecha_entrega
+v_ordenes_cocina: id_orden, numero_orden, tipo_orden, mesa_numero, estado_orden, fecha_creacion
+v_ordenes_pendientes_pago: id_orden, numero_orden, total, estado_pago
+v_paquetes_detalle: nombre_paquete, nombre_grupo, nombre_producto, precio_adicional
+v_paquetes: id, paquete, descripcion, precio, tipo, dias_disponibles, activo, url_imagen
+v_permisos: id_permiso, nombre_permiso
+v_producto_ingrediente: id_producto_ingrediente, id_producto, nombre_producto, id_ingrediente, nombre_ingrediente, es_obligatorio, precio_modificador, activo
+v_productos: id_producto, nombre_producto, descripcion_pro, precio_base, categoría, zona, disponibilidad, url_imagen
+v_promocion_clientes: id_promocion, nombre_promocion, id_cliente, nombre_cliente, promocion_activa
+v_promocion_paquetes: id_promocion, nombre_promocion, id_paquete, nombre_paquete
+v_promocion_productos: id_promocion, nombre_promocion, id_producto, nombre_producto
+v_promociones: id_promocion, nombre_promocion, descripcion, tipo_promocion, valor_descuento, tipo_vigencia, fecha_inicio, fecha_fin, hora_inicio, hora_fin, dias_aplicables, solo_clientes_registrados, activo, fecha_creacion
+v_roles: id_rol, nombre_rol, descripcion
+v_roles_permisos: id_rol, nombre_rol, id_permiso, nombre_permiso
+v_tipo_beneficio: id_tipo_beneficio, nombre, descripcion, activo
+v_uso_beneficios: id_uso_beneficio, id_cliente_beneficio, id_cliente, nombre_cliente, id_orden, numero_orden
+v_usuarios_roles: id_usuario, nombre_usuario, id_rol, nombre_rol
+v_zonas: id_zona, nombre_zona, descripcion_zona
+vw_menus_activos: id_menu, nombre_menu, descripcion, hora_inicio, hora_fin, dias_semana, fecha_inicio, fecha_fin

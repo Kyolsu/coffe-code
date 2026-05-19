@@ -1,0 +1,305 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.categoria (
+  id_categoria integer NOT NULL DEFAULT nextval('categoria_id_categoria_seq'::regclass),
+  nombre_cat character varying NOT NULL,
+  descripcion_cat text,
+  activo boolean DEFAULT true,
+  CONSTRAINT categoria_pkey PRIMARY KEY (id_categoria)
+);
+CREATE TABLE public.cliente_beneficio (
+  id_cliente_beneficio integer NOT NULL DEFAULT nextval('cliente_beneficio_id_cliente_beneficio_seq'::regclass),
+  id_cliente integer NOT NULL,
+  id_tipo_beneficio integer NOT NULL,
+  cantidad_disponible integer DEFAULT 0,
+  cantidad_usada integer DEFAULT 0,
+  fecha_inicio date NOT NULL,
+  fecha_fin date,
+  dias_aplica character varying,
+  activo boolean DEFAULT true,
+  CONSTRAINT cliente_beneficio_pkey PRIMARY KEY (id_cliente_beneficio),
+  CONSTRAINT fk_cb_cliente FOREIGN KEY (id_cliente) REFERENCES public.clientes(id_cliente),
+  CONSTRAINT fk_cb_tipo_beneficio FOREIGN KEY (id_tipo_beneficio) REFERENCES public.tipo_beneficio(id_tipo_beneficio)
+);
+CREATE TABLE public.clientes (
+  id_cliente integer NOT NULL DEFAULT nextval('clientes_id_cliente_seq'::regclass),
+  nombre character varying,
+  email character varying UNIQUE,
+  telefono character varying,
+  codigo_rfid character varying UNIQUE,
+  activo boolean DEFAULT true,
+  fecha_registro timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT clientes_pkey PRIMARY KEY (id_cliente)
+);
+CREATE TABLE public.ingredientes (
+  id_ingrediente integer NOT NULL DEFAULT nextval('ingredientes_id_ingrediente_seq'::regclass),
+  nombre_ingrediente character varying NOT NULL,
+  tipo_ingrediente USER-DEFINED,
+  precio_adicional numeric DEFAULT 0,
+  activo boolean DEFAULT true,
+  CONSTRAINT ingredientes_pkey PRIMARY KEY (id_ingrediente)
+);
+CREATE TABLE public.inventario (
+  id_inventario integer NOT NULL DEFAULT nextval('inventario_id_inventario_seq'::regclass),
+  id_ingrediente integer NOT NULL,
+  cantidad_actual numeric DEFAULT 0,
+  cantidad_minima numeric DEFAULT 0,
+  unidad character varying,
+  fecha_actualizacion timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  activo boolean DEFAULT true,
+  CONSTRAINT inventario_pkey PRIMARY KEY (id_inventario),
+  CONSTRAINT fk_inv_ingrediente FOREIGN KEY (id_ingrediente) REFERENCES public.ingredientes(id_ingrediente)
+);
+CREATE TABLE public.inventario_movimientos (
+  id_movimiento integer NOT NULL DEFAULT nextval('inventario_movimientos_id_movimiento_seq'::regclass),
+  id_inventario integer,
+  tipo_movimiento character varying,
+  cantidad numeric,
+  motivo text,
+  fecha_movimiento timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  id_usuario integer,
+  activo boolean DEFAULT true,
+  CONSTRAINT inventario_movimientos_pkey PRIMARY KEY (id_movimiento),
+  CONSTRAINT fk_mov_inventario FOREIGN KEY (id_inventario) REFERENCES public.inventario(id_inventario)
+);
+CREATE TABLE public.menu_productos (
+  id_menu integer NOT NULL,
+  id_producto integer NOT NULL,
+  CONSTRAINT menu_productos_pkey PRIMARY KEY (id_menu, id_producto),
+  CONSTRAINT menu_productos_id_menu_fkey FOREIGN KEY (id_menu) REFERENCES public.menus(id_menu),
+  CONSTRAINT menu_productos_id_producto_fkey FOREIGN KEY (id_producto) REFERENCES public.productos(id_producto)
+);
+CREATE TABLE public.menus (
+  id_menu integer NOT NULL DEFAULT nextval('menus_id_menu_seq'::regclass),
+  nombre_menu character varying NOT NULL,
+  descripcion text,
+  hora_inicio time without time zone NOT NULL,
+  hora_fin time without time zone NOT NULL,
+  dias_semana character varying,
+  activo boolean DEFAULT true,
+  fecha_inicio date,
+  fecha_fin date,
+  CONSTRAINT menus_pkey PRIMARY KEY (id_menu)
+);
+CREATE TABLE public.orden_detalle_modificadores (
+  id_detalle_modificador integer NOT NULL DEFAULT nextval('orden_detalle_modificadores_id_detalle_modificador_seq'::regclass),
+  id_orden_detalle integer NOT NULL,
+  id_ingrediente integer NOT NULL,
+  accion USER-DEFINED DEFAULT 'agregar'::accion_modificador_enum,
+  precio_modificador numeric DEFAULT 0.00,
+  CONSTRAINT orden_detalle_modificadores_pkey PRIMARY KEY (id_detalle_modificador),
+  CONSTRAINT fk_odm_detalle FOREIGN KEY (id_orden_detalle) REFERENCES public.orden_detalles(id_orden_detalle),
+  CONSTRAINT fk_odm_ingrediente FOREIGN KEY (id_ingrediente) REFERENCES public.ingredientes(id_ingrediente)
+);
+CREATE TABLE public.orden_detalles (
+  id_orden_detalle integer NOT NULL DEFAULT nextval('orden_detalles_id_orden_detalle_seq'::regclass),
+  id_orden integer NOT NULL,
+  id_producto integer,
+  id_paquete integer,
+  cantidad integer NOT NULL DEFAULT 1,
+  precio_unitario numeric NOT NULL,
+  descuento_aplicado numeric DEFAULT 0.00,
+  subtotal numeric NOT NULL,
+  id_promocion integer,
+  estado_preparacion USER-DEFINED DEFAULT 'pendiente'::estado_preparacion_enum,
+  id_zona integer,
+  notas_especiales text,
+  CONSTRAINT orden_detalles_pkey PRIMARY KEY (id_orden_detalle),
+  CONSTRAINT fk_od_orden FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden),
+  CONSTRAINT fk_od_producto FOREIGN KEY (id_producto) REFERENCES public.productos(id_producto),
+  CONSTRAINT fk_od_paquete FOREIGN KEY (id_paquete) REFERENCES public.paquetes(id_paquete),
+  CONSTRAINT fk_od_promocion FOREIGN KEY (id_promocion) REFERENCES public.promociones(id_promocion),
+  CONSTRAINT fk_od_zona FOREIGN KEY (id_zona) REFERENCES public.zonas(id_zona)
+);
+CREATE TABLE public.orden_pagos (
+  id_pago integer NOT NULL DEFAULT nextval('orden_pagos_id_pago_seq'::regclass),
+  id_orden integer,
+  metodo_pago USER-DEFINED NOT NULL,
+  monto_pagado numeric NOT NULL,
+  referencia character varying,
+  fecha_pago timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  id_usuario integer,
+  activo boolean DEFAULT true,
+  CONSTRAINT orden_pagos_pkey PRIMARY KEY (id_pago),
+  CONSTRAINT orden_pagos_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden),
+  CONSTRAINT orden_pagos_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
+);
+CREATE TABLE public.orden_paquete_selecciones (
+  id_seleccion integer NOT NULL DEFAULT nextval('orden_paquete_selecciones_id_seleccion_seq'::regclass),
+  id_orden_detalle integer NOT NULL,
+  id_paquete_grupo integer NOT NULL,
+  id_producto integer NOT NULL,
+  cantidad integer DEFAULT 1 CHECK (cantidad > 0),
+  CONSTRAINT orden_paquete_selecciones_pkey PRIMARY KEY (id_seleccion),
+  CONSTRAINT fk_ops_detalle FOREIGN KEY (id_orden_detalle) REFERENCES public.orden_detalles(id_orden_detalle),
+  CONSTRAINT fk_ops_grupo FOREIGN KEY (id_paquete_grupo) REFERENCES public.paquete_grupos(id_paquete_grupo),
+  CONSTRAINT fk_ops_producto FOREIGN KEY (id_producto) REFERENCES public.productos(id_producto)
+);
+CREATE TABLE public.ordenes (
+  id_orden integer NOT NULL DEFAULT nextval('ordenes_id_orden_seq'::regclass),
+  numero_orden character varying NOT NULL UNIQUE,
+  id_usuario integer,
+  id_cliente integer,
+  tipo_orden USER-DEFINED DEFAULT 'local'::tipo_orden_enum,
+  mesa_numero character varying,
+  subtotal numeric NOT NULL,
+  descuento numeric DEFAULT 0.00,
+  impuestos numeric DEFAULT 0.00,
+  total numeric NOT NULL,
+  estado_orden USER-DEFINED DEFAULT 'pendiente'::estado_orden_enum,
+  estado_pago USER-DEFINED DEFAULT 'pendiente'::estado_pago_enum,
+  metodo_pago USER-DEFINED,
+  notas_orden text,
+  fecha_creacion timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  fecha_actualizacion timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  fecha_entrega timestamp without time zone,
+  CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
+  CONSTRAINT ordenes_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario),
+  CONSTRAINT ordenes_id_cliente_fkey FOREIGN KEY (id_cliente) REFERENCES public.clientes(id_cliente)
+);
+CREATE TABLE public.paquete_grupo_productos (
+  id_paquete_grupo integer NOT NULL,
+  id_producto integer NOT NULL,
+  precio_adicional numeric DEFAULT 0.00,
+  CONSTRAINT paquete_grupo_productos_pkey PRIMARY KEY (id_paquete_grupo, id_producto),
+  CONSTRAINT paquete_grupo_productos_id_paquete_grupo_fkey FOREIGN KEY (id_paquete_grupo) REFERENCES public.paquete_grupos(id_paquete_grupo),
+  CONSTRAINT paquete_grupo_productos_id_producto_fkey FOREIGN KEY (id_producto) REFERENCES public.productos(id_producto)
+);
+CREATE TABLE public.paquete_grupos (
+  id_paquete_grupo integer NOT NULL DEFAULT nextval('paquete_grupos_id_paquete_grupo_seq'::regclass),
+  id_paquete integer NOT NULL,
+  nombre_grupo character varying,
+  seleccion_obligatoria boolean DEFAULT true,
+  cantidad_selecciones integer DEFAULT 1,
+  activo boolean DEFAULT true,
+  CONSTRAINT paquete_grupos_pkey PRIMARY KEY (id_paquete_grupo),
+  CONSTRAINT paquete_grupos_id_paquete_fkey FOREIGN KEY (id_paquete) REFERENCES public.paquetes(id_paquete)
+);
+CREATE TABLE public.paquetes (
+  id_paquete integer NOT NULL DEFAULT nextval('paquetes_id_paquete_seq'::regclass),
+  nombre_paquete character varying NOT NULL,
+  descripcion text,
+  precio_paquete numeric NOT NULL,
+  activo boolean DEFAULT true,
+  es_temporal boolean DEFAULT false,
+  fecha_inicio timestamp without time zone,
+  fecha_fin timestamp without time zone,
+  dias_disponibles character varying,
+  url_imagen text,
+  CONSTRAINT paquetes_pkey PRIMARY KEY (id_paquete)
+);
+CREATE TABLE public.permisos (
+  id_permiso integer NOT NULL DEFAULT nextval('permisos_id_permiso_seq'::regclass),
+  nombre_permiso character varying NOT NULL,
+  CONSTRAINT permisos_pkey PRIMARY KEY (id_permiso)
+);
+CREATE TABLE public.producto_ingrediente (
+  id_producto_ingrediente integer NOT NULL DEFAULT nextval('producto_ingrediente_id_producto_ingrediente_seq'::regclass),
+  id_producto integer NOT NULL,
+  id_ingrediente integer NOT NULL,
+  es_obligatorio boolean DEFAULT false,
+  precio_modificador numeric DEFAULT 0.0,
+  activo boolean DEFAULT true,
+  CONSTRAINT producto_ingrediente_pkey PRIMARY KEY (id_producto_ingrediente),
+  CONSTRAINT fk_pi_producto FOREIGN KEY (id_producto) REFERENCES public.productos(id_producto),
+  CONSTRAINT fk_pi_ingrediente FOREIGN KEY (id_ingrediente) REFERENCES public.ingredientes(id_ingrediente)
+);
+CREATE TABLE public.productos (
+  id_producto integer NOT NULL DEFAULT nextval('productos_id_producto_seq'::regclass),
+  nombre_producto character varying NOT NULL,
+  descripcion_pro text,
+  precio_base numeric NOT NULL,
+  id_zona integer NOT NULL,
+  id_categoria integer NOT NULL,
+  disponibilidad boolean DEFAULT true,
+  url_imagen text,
+  CONSTRAINT productos_pkey PRIMARY KEY (id_producto),
+  CONSTRAINT fk_producto_zona FOREIGN KEY (id_zona) REFERENCES public.zonas(id_zona),
+  CONSTRAINT fk_producto_categoria FOREIGN KEY (id_categoria) REFERENCES public.categoria(id_categoria)
+);
+CREATE TABLE public.promocion_clientes (
+  id_promocion integer NOT NULL,
+  id_cliente integer NOT NULL,
+  CONSTRAINT promocion_clientes_pkey PRIMARY KEY (id_promocion, id_cliente),
+  CONSTRAINT fk_pc_promocion FOREIGN KEY (id_promocion) REFERENCES public.promociones(id_promocion),
+  CONSTRAINT fk_pc_cliente FOREIGN KEY (id_cliente) REFERENCES public.clientes(id_cliente)
+);
+CREATE TABLE public.promocion_paquetes (
+  id_promocion integer NOT NULL,
+  id_paquete integer NOT NULL,
+  CONSTRAINT promocion_paquetes_pkey PRIMARY KEY (id_promocion, id_paquete),
+  CONSTRAINT fk_ppaq_promocion FOREIGN KEY (id_promocion) REFERENCES public.promociones(id_promocion),
+  CONSTRAINT fk_ppaq_paquete FOREIGN KEY (id_paquete) REFERENCES public.paquetes(id_paquete)
+);
+CREATE TABLE public.promocion_productos (
+  id_promocion integer NOT NULL,
+  id_producto integer NOT NULL,
+  CONSTRAINT promocion_productos_pkey PRIMARY KEY (id_promocion, id_producto),
+  CONSTRAINT fk_pp_promocion FOREIGN KEY (id_promocion) REFERENCES public.promociones(id_promocion),
+  CONSTRAINT fk_pp_producto FOREIGN KEY (id_producto) REFERENCES public.productos(id_producto)
+);
+CREATE TABLE public.promociones (
+  id_promocion integer NOT NULL DEFAULT nextval('promociones_id_promocion_seq'::regclass),
+  nombre_promocion character varying NOT NULL,
+  descripcion text,
+  tipo_promocion USER-DEFINED NOT NULL,
+  valor_descuento numeric,
+  es_temporal boolean DEFAULT false,
+  fecha_inicio timestamp without time zone,
+  fecha_fin timestamp without time zone,
+  hora_inicio time without time zone,
+  hora_fin time without time zone,
+  dias_aplicables ARRAY,
+  es_permanente boolean DEFAULT false,
+  solo_clientes_registrados boolean DEFAULT false,
+  activo boolean DEFAULT true,
+  fecha_creacion timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT promociones_pkey PRIMARY KEY (id_promocion)
+);
+CREATE TABLE public.rol_permiso (
+  id_rol integer NOT NULL,
+  id_permiso integer NOT NULL,
+  CONSTRAINT rol_permiso_pkey PRIMARY KEY (id_rol, id_permiso),
+  CONSTRAINT rol_permiso_id_rol_fkey FOREIGN KEY (id_rol) REFERENCES public.roles(id_rol),
+  CONSTRAINT rol_permiso_id_permiso_fkey FOREIGN KEY (id_permiso) REFERENCES public.permisos(id_permiso)
+);
+CREATE TABLE public.roles (
+  id_rol integer NOT NULL DEFAULT nextval('roles_id_rol_seq'::regclass),
+  nombre_rol character varying NOT NULL,
+  descripcion character varying,
+  CONSTRAINT roles_pkey PRIMARY KEY (id_rol)
+);
+CREATE TABLE public.tipo_beneficio (
+  id_tipo_beneficio integer NOT NULL DEFAULT nextval('tipo_beneficio_id_tipo_beneficio_seq'::regclass),
+  nombre character varying NOT NULL,
+  descripcion text,
+  activo boolean DEFAULT true,
+  CONSTRAINT tipo_beneficio_pkey PRIMARY KEY (id_tipo_beneficio)
+);
+CREATE TABLE public.uso_beneficios (
+  id_uso_beneficio integer NOT NULL DEFAULT nextval('uso_beneficios_id_uso_beneficio_seq'::regclass),
+  id_cliente_beneficio integer,
+  id_orden integer,
+  cantidad_usada integer DEFAULT 1,
+  fecha_uso timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+  activo boolean DEFAULT true,
+  CONSTRAINT uso_beneficios_pkey PRIMARY KEY (id_uso_beneficio),
+  CONSTRAINT uso_beneficios_id_cliente_beneficio_fkey FOREIGN KEY (id_cliente_beneficio) REFERENCES public.cliente_beneficio(id_cliente_beneficio),
+  CONSTRAINT uso_beneficios_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden)
+);
+CREATE TABLE public.usuarios (
+  id_usuario integer NOT NULL DEFAULT nextval('usuarios_id_usuario_seq'::regclass),
+  nombre_usuario character varying,
+  contra text,
+  id_rol integer,
+  CONSTRAINT usuarios_pkey PRIMARY KEY (id_usuario),
+  CONSTRAINT usuarios_id_rol_fkey FOREIGN KEY (id_rol) REFERENCES public.roles(id_rol)
+);
+CREATE TABLE public.zonas (
+  id_zona integer NOT NULL DEFAULT nextval('zonas_id_zona_seq'::regclass),
+  nombre_zona character varying NOT NULL,
+  descripcion_zona text,
+  activo boolean DEFAULT true,
+  CONSTRAINT zonas_pkey PRIMARY KEY (id_zona)
+);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import API_URL from '../config/api'
@@ -38,6 +38,10 @@ const isLoading = ref(false)
 const error = ref<string | null>(null)
 let pollInterval: number | null = null
 
+// Zonas
+const zonas = ref<{ id_zona: number; nombre_zona: string }[]>([])
+const selectedZona = ref<number | null>(null)
+
 // ── FETCH ──────────────────────────────────────────────
 const fetchConToken = async (endpoint: string, method = 'GET', body: any = null) => {
   try {
@@ -61,6 +65,13 @@ const fetchConToken = async (endpoint: string, method = 'GET', body: any = null)
 // ── CARGA DE DATOS ────────────────────────────────────
 const orders = ref<Order[]>([])
 
+const loadZonas = async () => {
+  const res = await fetchConToken('/tienda/zonas/mostrar')
+  if (res.status === 'ok' && res.datos) {
+    zonas.value = res.datos
+  }
+}
+
 const loadOrders = async () => {
   isLoading.value = true
   error.value = null
@@ -79,7 +90,13 @@ const loadOrders = async () => {
         return estado === 'pendiente' || estado === 'en proceso' || estado === 'preparando'
       })
       .map((o: any) => {
-        const ordenDetalles = detalles.filter((d: any) => d.id_orden === o.id_orden)
+        let ordenDetalles = detalles.filter((d: any) => d.id_orden === o.id_orden)
+        
+        // Filtrar por zona si hay una seleccionada
+        if (selectedZona.value !== null) {
+          ordenDetalles = ordenDetalles.filter((d: any) => d.id_zona === selectedZona.value)
+        }
+        
         const items: OrderItem[] = ordenDetalles.map((d: any) => ({
           name: d.nombre_producto || d.nombre_paquete || 'Producto',
           qty: d.cantidad || 1,
@@ -96,6 +113,7 @@ const loadOrders = async () => {
           createdAt: o.fecha_creacion ? new Date(o.fecha_creacion).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '--:--'
         }
       })
+      .filter((o: Order) => o.items.length > 0) // Solo mostrar órdenes que tienen items en la zona seleccionada
   } else {
     error.value = ordenesRes.mensaje || 'Error al cargar órdenes de cocina'
   }
@@ -144,10 +162,15 @@ const stopPolling = () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadZonas()
   loadOrders()
   startPolling()
   window.addEventListener('keydown', handleKeydown)
+})
+
+watch(selectedZona, () => {
+  loadOrders()
 })
 
 onUnmounted(() => {
@@ -189,6 +212,14 @@ const handleLogout = () => {
         </div>
 
         <div class="kd-header-right">
+          <div class="zona-selector">
+            <select v-model="selectedZona" class="zona-select">
+              <option :value="null">Todas las zonas</option>
+              <option v-for="zona in zonas" :key="zona.id_zona" :value="zona.id_zona">
+                {{ zona.nombre_zona }}
+              </option>
+            </select>
+          </div>
           <div class="kd-count">
             <span v-if="isLoading" class="kd-loading">⟳</span>
             <span class="kd-count-number">{{ orders.length }}</span>
