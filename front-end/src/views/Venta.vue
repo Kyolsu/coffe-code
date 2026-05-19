@@ -111,6 +111,7 @@ interface CartItem {
   promoGroupId?: number
   promoGroupName?: string
   isPromoItem?: boolean
+  packageProductModifiers?: Record<number, IngredienteOpcion[]>
 }
 
 // ── ESTADO ─────────────────────────────────────────────
@@ -328,10 +329,15 @@ const displayToast = (msg: string, type: 'success' | 'warning' | 'error' = 'succ
 }
 
 // ── FETCH DATOS ────────────────────────────────────────
-const fetchConToken = async (endpoint: string) => {
+const fetchConToken = async (endpoint: string, options: RequestInit = {}) => {
   try {
     const res = await fetch(`${API_BASE}${endpoint}`, {
-      headers: { 'auth-token': authStore.token || '', 'Content-Type': 'application/json' }
+      headers: { 
+        'auth-token': authStore.token || '', 
+        'Content-Type': 'application/json',
+        ...options.headers
+      },
+      ...options
     })
     return await res.json()
   } catch (error) {
@@ -649,6 +655,7 @@ interface CartDisplayItem {
   promoGroupName?: string
   isPromoItem?: boolean
   isFree?: boolean
+  packageProductModifiers?: Record<number, IngredienteOpcion[]>
 }
 
 interface CartDisplayGroup {
@@ -738,14 +745,14 @@ const handleProductClick = async (product: Producto) => {
   const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${product.id_producto}`)
   console.log('🍔 [DEBUG] Ingredientes response for product', product.id_producto, ':', JSON.stringify(res, null, 2))
   
-  const opcionesActivas = (res.datos || []).filter((i: any) => i.activo).map((i: any) => ({
+  const todasOpciones = (res.datos || []).map((i: any) => ({
     ...i,
     precio_modificador: Number(i.precio_modificador || 0),
-    seleccionado: i.es_obligatorio
+    seleccionado: true
   }))
 
-  if (opcionesActivas.length > 0) {
-    currentOptions.value = opcionesActivas
+  if (todasOpciones.length > 0) {
+    currentOptions.value = todasOpciones
     selectedProductForOptions.value = product
     showOptionsModal.value = true
   } else {
@@ -766,6 +773,11 @@ const confirmOptionsAndAddToCart = () => {
     displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
     isPromoContext.value = false
     promoContextProduct.value = null
+    
+    showOptionsModal.value = false
+    selectedProductForOptions.value = null
+    currentOptions.value = []
+    showPromoModal.value = true
   } else if (editingCartItemId.value !== null) {
     const cartItem = cart.value.find(item => item.cartId === editingCartItemId.value)
     if (cartItem) {
@@ -775,15 +787,24 @@ const confirmOptionsAndAddToCart = () => {
       displayToast('Ingredientes actualizados', 'success')
     }
     editingCartItemId.value = null
+    showOptionsModal.value = false
+    selectedProductForOptions.value = null
+    currentOptions.value = []
   } else {
     addDirectlyToCart(selectedProductForOptions.value, selectedModifiers)
+    showOptionsModal.value = false
+    selectedProductForOptions.value = null
+    currentOptions.value = []
   }
-  showOptionsModal.value = false
-  selectedProductForOptions.value = null
-  currentOptions.value = []
 }
 
 const closeOptionsModal = () => {
+  if (pendingPackageContext) {
+    packageProductModifiers.value = {}
+    currentPendingPackageSelections.value = []
+    pendingPackageContext = null
+    displayToast('Paquete cancelado', 'warning')
+  }
   showOptionsModal.value = false
   selectedProductForOptions.value = null
   currentOptions.value = []
@@ -860,11 +881,27 @@ const openEditCartItemModal = async (cartItem: CartItem) => {
 
 // ── PAQUETES ────────────────────────────────────────────
 const openPackageModal = (paquete: Paquete) => {
-  selectedPackage.value = paquete
+  const filteredGrupos = paquete.grupos.map(g => ({
+    ...g,
+    productos: g.productos.filter(p => {
+      const product = allProducts.value.find(ap => ap.id_producto === p.id_producto)
+      return product && 
+             product.disponibilidad !== false && 
+             productosEnMenusActivos.value.includes(p.id_producto)
+    })
+  })).filter(g => g.productos.length > 0)
+
+  selectedPackage.value = { ...paquete, grupos: filteredGrupos }
   packageSelections.value = new Map()
   packageValidationError.value = ''
+  packageProductModifiers.value = {}
+  currentPendingPackageSelections.value = []
   showPackageModal.value = true
 }
+
+const packageProductModifiers = ref<Record<number, IngredienteOpcion[]>>({})
+const currentPendingPackageSelections = ref<{ id_grupo: number; producto: PaqueteProducto }[]>([])
+let pendingPackageContext: { id_grupo: number; producto: PaqueteProducto } | null = null
 
 const togglePackageProduct = (grupoId: number, producto: PaqueteProducto) => {
   const current = packageSelections.value.get(grupoId) || []
@@ -901,16 +938,86 @@ const validatePackageSelection = (): boolean => {
   return true
 }
 
-const addPackageToCart = () => {
+const addPackageToCart = async () => {
   if (!selectedPackage.value || !validatePackageSelection()) return
   
+  const allSelections: { id_grupo: number; producto: PaqueteProducto }[] = []
+  
+  packageSelections.value.forEach((productos, grupoId) => {
+    productos.forEach(p => {
+      allSelections.push({ id_grupo: Number(grupoId), producto: p })
+    })
+  })
+
+  packageProductModifiers.value = {}
+  currentPendingPackageSelections.value = allSelections
+  showPackageModal.value = false
+
+  await processNextPackageProduct()
+}
+
+const processNextPackageProduct = async () => {
+  if (currentPendingPackageSelections.value.length === 0) {
+    finalizePackageAdd()
+    return
+  }
+
+  const current = currentPendingPackageSelections.value[0]!
+  const producto = allProducts.value.find(p => p.id_producto === current.producto.id_producto)
+  
+  if (!producto) {
+    currentPendingPackageSelections.value.shift()
+    await processNextPackageProduct()
+    return
+  }
+
+  isPromoContext.value = false
+  isLoadingOptions.value = true
+  const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${producto.id_producto}`)
+  
+  const todasOpciones = (res.datos || []).map((i: any) => ({
+    ...i,
+    precio_modificador: Number(i.precio_modificador || 0),
+    seleccionado: true
+  }))
+
+  if (todasOpciones.length > 0) {
+    currentOptions.value = todasOpciones
+    selectedProductForOptions.value = producto
+    pendingPackageContext = { ...current }
+    showOptionsModal.value = true
+  } else {
+    packageProductModifiers.value[current.producto.id_producto] = []
+    currentPendingPackageSelections.value.shift()
+    await processNextPackageProduct()
+  }
+  isLoadingOptions.value = false
+}
+
+const confirmPackageOptions = async () => {
+  if (!selectedProductForOptions.value || !pendingPackageContext) return
+  
+  const selectedModifiers = currentOptions.value.filter(o => o.seleccionado)
+  packageProductModifiers.value[pendingPackageContext.producto.id_producto] = selectedModifiers
+
+  showOptionsModal.value = false
+  selectedProductForOptions.value = null
+  currentOptions.value = []
+  pendingPackageContext = null
+
+  currentPendingPackageSelections.value.shift()
+  await processNextPackageProduct()
+}
+
+const finalizePackageAdd = () => {
+  if (!selectedPackage.value) return
+
   const selections: { id_grupo: number; id_producto: number; nombre: string }[] = []
   let extraPrice = 0
   
   packageSelections.value.forEach((productos, grupoId) => {
-    const grupo = selectedPackage.value!.grupos.find(g => g.id_grupo === grupoId)
     productos.forEach(p => {
-      selections.push({ id_grupo: grupoId, id_producto: p.id_producto, nombre: p.nombre_producto })
+      selections.push({ id_grupo: Number(grupoId), id_producto: p.id_producto, nombre: p.nombre_producto })
       extraPrice += p.precio_adicional
     })
   })
@@ -928,12 +1035,14 @@ const addPackageToCart = () => {
     isPackage: true,
     packageId: selectedPackage.value.id_paquete,
     packageSelections: selections,
-    extraPrice: extraPrice
+    extraPrice: extraPrice,
+    packageProductModifiers: { ...packageProductModifiers.value }
   })
 
   playSound('added')
   displayToast(`${selectedPackage.value.nombre_paquete} agregado`, 'success')
-  showPackageModal.value = false
+  packageProductModifiers.value = {}
+  currentPendingPackageSelections.value = []
 }
 
 // ── RFID ────────────────────────────────────────────────
@@ -1002,12 +1111,18 @@ const openPromoModal = async (promo: Promocion) => {
   promoSelectedProducts.value = {}
   promoItemsWithModifiers.value = []
   
-  // Cargar productos disponibles para esta promoción
   const promoProds = promo.productos || []
   if (promoProds.length > 0) {
-    promoProductos.value = allProducts.value.filter(p => promoProds.includes(p.id_producto))
+    promoProductos.value = allProducts.value.filter(p => 
+      promoProds.includes(p.id_producto) && 
+      p.disponibilidad !== false && 
+      productosEnMenusActivos.value.includes(p.id_producto)
+    )
   } else {
-    promoProductos.value = allProducts.value.filter(p => p.disponibilidad !== false && productosEnMenusActivos.value.includes(p.id_producto))
+    promoProductos.value = allProducts.value.filter(p => 
+      p.disponibilidad !== false && 
+      productosEnMenusActivos.value.includes(p.id_producto)
+    )
   }
   
   showPromoModal.value = true
@@ -1021,18 +1136,19 @@ const openPromoProductOptions = async (product: Producto) => {
 
   isPromoContext.value = true
   promoContextProduct.value = product
+  showPromoModal.value = false
 
   isLoadingOptions.value = true
   const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${product.id_producto}`)
   
-  const opcionesActivas = (res.datos || []).filter((i: any) => i.activo).map((i: any) => ({
+  const todasOpciones = (res.datos || []).map((i: any) => ({
     ...i,
     precio_modificador: Number(i.precio_modificador || 0),
-    seleccionado: i.es_obligatorio
+    seleccionado: true
   }))
 
-  if (opcionesActivas.length > 0) {
-    currentOptions.value = opcionesActivas
+  if (todasOpciones.length > 0) {
+    currentOptions.value = todasOpciones
     selectedProductForOptions.value = product
     showOptionsModal.value = true
   } else {
@@ -1159,6 +1275,16 @@ const removePromoFromCart = (idPromo: number) => {
   appliedPromociones.value = appliedPromociones.value.filter(p => p.id_promocion !== idPromo)
 }
 
+const removeAppliedPromo = (idPromo: number) => {
+  const promo = appliedPromociones.value.find(p => p.id_promocion === idPromo)
+  if (promo) {
+    const groupName = promo.nombre
+    cart.value = cart.value.filter(item => item.promoGroupName !== groupName)
+  }
+  appliedPromociones.value = appliedPromociones.value.filter(p => p.id_promocion !== idPromo)
+  displayToast('Promoción eliminada', 'success')
+}
+
 const removePromoItem = (index: number) => {
   promoItemsWithModifiers.value.splice(index, 1)
   displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
@@ -1213,35 +1339,140 @@ const processPay = async () => {
   isProcessingPayment.value = true
   
   try {
-    // Por ahora simulando - cuando endpoints estén disponibles:
-    // 1. POST /api/ordenes/agregar
-    // 2. POST /api/ordenes/detalles/agregar para cada item
-    // 3. POST /api/ordenes/pagos/agregar
+    const numeroOrden = `ORD-${Date.now()}`
     
-    const payload = {
-      id_cliente: selectedClient.value?.id_cliente || null,
-      metodo_pago: selectedPayment.value,
-      subtotal: subtotalConIva.value,
-      descuento: totalDescuentos.value,
-      impuestos: iva.value,
-      total: total.value,
-      notas: orderNote.value,
-      productos: cart.value.map(item => ({
-        ...item,
-        nota: itemNotes.value[item.cartId] || ''
-      })),
-      promociones_aplicadas: appliedPromociones.value
+    const ordenRes = await fetchConToken('/ordenes/agregar', {
+      method: 'POST',
+      body: JSON.stringify({
+        numero_orden: numeroOrden,
+        subtotal: subtotalSinIva.value,
+        total: total.value,
+        id_cliente: selectedClient.value?.id_cliente || null,
+        tipo_orden: 'local',
+        mesa_numero: null,
+        descuento: totalDescuentos.value,
+        impuestos: iva.value,
+        notas: orderNote.value
+      })
+    })
+
+    if (ordenRes.status !== 'ok') {
+      throw new Error(ordenRes.mensaje || 'Error al crear la orden')
     }
+
+    const idOrden = ordenRes.id_orden
+    console.log('📤 [DEBUG] Orden creada:', { numeroOrden, idOrden })
+
+    for (const item of cart.value) {
+      console.log('📤 [DEBUG] Agregando detalle:', { item: item.name, qty: item.qty, price: item.unitTotal })
+      
+      const detalleRes = await fetchConToken('/ordenes/detalles/agregar', {
+        method: 'POST',
+        body: JSON.stringify({
+          id_orden: idOrden,
+          cantidad: item.qty,
+          precio_unitario: item.unitTotal / 1.16,
+          subtotal: item.qty * (item.unitTotal / 1.16),
+          id_producto: item.isPackage ? null : item.productId,
+          id_paquete: item.isPackage ? item.packageId : null,
+          descuento: 0,
+          id_promocion: item.promoGroupId ? item.promoGroupId : null,
+          id_zona: null,
+          notas: itemNotes.value[item.cartId] || null
+        })
+      })
+
+      console.log('📥 [DEBUG] Detalle response:', detalleRes)
+
+      if (detalleRes.status !== 'ok') {
+        throw new Error(detalleRes.mensaje || 'Error al agregar item')
+      }
+
+      const idDetalle = detalleRes.id_orden_detalle
+
+      if (item.modifiers && item.modifiers.length > 0) {
+        console.log('📤 [DEBUG] Agregando modificadores para item:', item.name)
+        for (const mod of item.modifiers) {
+          console.log('   ➡️ Modificador:', { id_ingrediente: mod.id_ingrediente, nombre: mod.nombre_ingrediente, precio: mod.precio_modificador })
+          const modRes = await fetchConToken('/ordenes/detalles-modificadores/', {
+            method: 'POST',
+            body: JSON.stringify({
+              id_detalle: idDetalle,
+              id_ingrediente: mod.id_ingrediente,
+              accion: 'agregar',
+              precio: mod.precio_modificador || 0
+            })
+          })
+          console.log('   📥 Modificador response:', modRes)
+        }
+      }
+
+      if (item.isPackage && item.packageSelections && item.packageSelections.length > 0) {
+        console.log('📤 [DEBUG] Agregando selections de paquete:', item.packageSelections)
+        const packageMods = item.packageProductModifiers || {}
+        
+        for (const sel of item.packageSelections) {
+          console.log('   ➡️ Selección paquete:', { nombre: sel.nombre, id_grupo: sel.id_grupo, id_producto: sel.id_producto })
+          
+          const selRes = await fetchConToken('/ordenes/paquete-seleccion/agregar', {
+            method: 'POST',
+            body: JSON.stringify({
+              id_detalle: idDetalle,
+              id_grupo: sel.id_grupo,
+              id_producto: sel.id_producto,
+              cantidad: 1
+            })
+          })
+
+          console.log('   📥 Selección response:', selRes)
+
+          if (selRes.status !== 'ok') {
+            throw new Error(selRes.mensaje || 'Error al agregar selección de paquete')
+          }
+
+          const idSeleccion = selRes.id_seleccion
+
+          const modsProducto = packageMods[sel.id_producto] || []
+          if (modsProducto.length > 0) {
+            console.log('   📤 [DEBUG] Modificadores de selección:', modsProducto.map(m => m.nombre_ingrediente))
+            for (const mod of modsProducto) {
+              const modSelRes = await fetchConToken('/ordenes/detalles-modificadores/', {
+                method: 'POST',
+                body: JSON.stringify({
+                  id_detalle: idDetalle,
+                  id_ingrediente: mod.id_ingrediente,
+                  accion: 'agregar',
+                  precio: mod.precio_modificador || 0
+                })
+              })
+              console.log('   📥 Modificador selección response:', modSelRes)
+            }
+          }
+        }
+      }
+    }
+
+    console.log('📤 [DEBUG] Registrando pago:', { id_orden: idOrden, metodo: selectedPayment.value, monto: total.value })
     
-    console.log('Procesando orden:', payload)
-    
-    // Simular delay
-    await new Promise(r => setTimeout(r, 1500))
-    
+    const pagoRes = await fetchConToken('/ordenes/pagos/agregar', {
+      method: 'POST',
+      body: JSON.stringify({
+        id_orden: idOrden,
+        metodo: selectedPayment.value,
+        monto: total.value,
+        referencia: null
+      })
+    })
+
+    console.log('📥 [DEBUG] Pago response:', pagoRes)
+
+    if (pagoRes.status !== 'ok') {
+      throw new Error(pagoRes.mensaje || 'Error al registrar el pago')
+    }
+
     playSound('success')
-    displayToast('Orden procesada correctamente', 'success')
+    displayToast(`Orden ${numeroOrden} procesada correctamente`, 'success')
     
-    // Limpiar
     cart.value = []
     selectedClient.value = null
     rfidDetectedClient.value = null
@@ -1252,9 +1483,10 @@ const processPay = async () => {
     clearSavedTicket()
     showConfirmModal.value = false
     
-  } catch (error) {
+  } catch (error: any) {
+    console.error('Error al procesar la orden:', error)
     playSound('error')
-    displayToast('Error al procesar la orden', 'error')
+    displayToast(error.message || 'Error al procesar la orden', 'error')
   } finally {
     isProcessingPayment.value = false
   }
@@ -1425,6 +1657,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         <div v-if="appliedPromociones.length > 0" class="applied-promos">
           <div v-for="promo in appliedPromociones" :key="promo.id_promocion" class="promo-applied-tag">
             {{ promo.nombre }}
+            <button class="remove-promo-btn" @click="removeAppliedPromo(promo.id_promocion)" title="Eliminar promoción">✕</button>
           </div>
         </div>
 
@@ -1486,6 +1719,11 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
                 <div v-if="entry.item.packageSelections?.length" class="package-selections">
                   <span v-for="sel in entry.item.packageSelections" :key="sel.id_producto" class="sel-chip">
                     {{ sel.nombre }}
+                    <template v-if="entry.item.packageProductModifiers">
+                      <span v-for="mod in (entry.item.packageProductModifiers[sel.id_producto] || [])" :key="mod.id_ingrediente" class="sel-mod">
+                        {{ mod.nombre_ingrediente }}
+                      </span>
+                    </template>
                   </span>
                 </div>
                 <input 
@@ -1559,7 +1797,10 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         </div>
         <div class="modal-actions">
           <button class="btn btn--secondary" @click="closeOptionsModal">Cancelar</button>
-          <button class="btn btn--primary" @click="confirmOptionsAndAddToCart">
+          <button v-if="pendingPackageContext" class="btn btn--primary" @click="confirmPackageOptions">
+            Siguiente
+          </button>
+          <button v-else class="btn btn--primary" @click="confirmOptionsAndAddToCart">
             {{ isEditingCartItem ? 'Actualizar' : 'Agregar' }}
           </button>
         </div>
@@ -1788,7 +2029,9 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .btn-client-small { background: #fff; border: 1px solid #2563eb; color: #2563eb; border-radius: 16px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .applied-promos { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; background: #ecfdf5; border-bottom: 1px solid #d1fae5; }
-.promo-applied-tag { font-size: 11px; background: #10b981; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+.promo-applied-tag { display: flex; align-items: center; gap: 4px; font-size: 11px; background: #10b981; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+.remove-promo-btn { background: none; border: none; color: #fff; cursor: pointer; font-size: 10px; padding: 0 2px; opacity: 0.8; }
+.remove-promo-btn:hover { opacity: 1; }
 
 /* ── CART ITEMS ── */
 .cart-items { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
