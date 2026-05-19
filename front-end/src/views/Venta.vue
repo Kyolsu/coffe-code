@@ -108,6 +108,9 @@ interface CartItem {
   packageSelections?: { id_grupo: number; id_producto: number; nombre: string }[]
   extraPrice?: number
   categoria?: string
+  promoGroupId?: number
+  promoGroupName?: string
+  isPromoItem?: boolean
 }
 
 // ── ESTADO ─────────────────────────────────────────────
@@ -197,8 +200,20 @@ const selectedPromo = ref<Promocion | null>(null)
 const promoProductos = ref<any[]>([])
 const promoSelectedProducts = ref<Record<number, number>>({})
 
+// Items de promoción con sus modifiers personalizados
+interface PromoItemWithModifiers {
+  product: Producto
+  modifiers: IngredienteOpcion[]
+}
+
+const promoItemsWithModifiers = ref<PromoItemWithModifiers[]>([])
+
+// Contexto para saber si el modal de opciones se abre desde promoción
+const isPromoContext = ref(false)
+const promoContextProduct = ref<Producto | null>(null)
+
 const totalPromoSeleccionados = computed(() => {
-  return Object.values(promoSelectedProducts.value).reduce((sum, qty) => sum + qty, 0)
+  return promoItemsWithModifiers.value.length
 })
 
 // Notas
@@ -616,6 +631,70 @@ const packageExtraPrice = computed(() => {
   return extra
 })
 
+interface CartDisplayItem {
+  cartId: number
+  productId: number
+  name: string
+  qty: number
+  basePrice: number
+  modifiers: IngredienteOpcion[]
+  unitTotal: number
+  note?: string
+  isPackage?: boolean
+  packageId?: number
+  packageSelections?: { id_grupo: number; id_producto: number; nombre: string }[]
+  extraPrice?: number
+  categoria?: string
+  promoGroupId?: number
+  promoGroupName?: string
+  isPromoItem?: boolean
+  isFree?: boolean
+}
+
+interface CartDisplayGroup {
+  type: 'group'
+  promoGroupId: number
+  promoGroupName: string
+  items: CartDisplayItem[]
+}
+
+interface CartDisplaySingle {
+  type: 'single'
+  item: CartDisplayItem
+}
+
+type CartDisplayEntry = CartDisplayGroup | CartDisplaySingle
+
+const cartDisplay = computed((): CartDisplayEntry[] => {
+  const result: CartDisplayEntry[] = []
+  const processedGroupIds = new Set<number>()
+
+  for (const item of cart.value) {
+    if (item.promoGroupId && !processedGroupIds.has(item.promoGroupId)) {
+      const groupItems = cart.value.filter(i => i.promoGroupId === item.promoGroupId)
+      const maxTotal = Math.max(...groupItems.map(i => i.unitTotal))
+      
+      const displayItems: CartDisplayItem[] = groupItems.map(i => ({
+        ...i,
+        isFree: i.unitTotal !== maxTotal,
+        unitTotal: i.unitTotal === maxTotal ? i.unitTotal : 0
+      }))
+      
+      result.push({
+        type: 'group',
+        promoGroupId: item.promoGroupId!,
+        promoGroupName: item.promoGroupName || '',
+        items: displayItems
+      })
+      processedGroupIds.add(item.promoGroupId)
+    } else if (!item.promoGroupId) {
+      result.push({ type: 'single', item: { ...item, isFree: false } })
+    }
+  }
+
+  return result
+})
+
 // Descuentos - el precio ya incluye IVA, calculamos la base sin IVA
 const subtotalConIva = computed(() => 
   cart.value.reduce((acc, item) => acc + item.qty * item.unitTotal, 0)
@@ -679,7 +758,15 @@ const confirmOptionsAndAddToCart = () => {
   if (!selectedProductForOptions.value) return
   const selectedModifiers = currentOptions.value.filter(o => o.seleccionado)
   
-  if (editingCartItemId.value !== null) {
+  if (isPromoContext.value) {
+    promoItemsWithModifiers.value.push({
+      product: selectedProductForOptions.value,
+      modifiers: [...selectedModifiers]
+    })
+    displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
+    isPromoContext.value = false
+    promoContextProduct.value = null
+  } else if (editingCartItemId.value !== null) {
     const cartItem = cart.value.find(item => item.cartId === editingCartItemId.value)
     if (cartItem) {
       const modsPrice = selectedModifiers.reduce((acc, mod) => acc + mod.precio_modificador, 0)
@@ -701,6 +788,8 @@ const closeOptionsModal = () => {
   selectedProductForOptions.value = null
   currentOptions.value = []
   editingCartItemId.value = null
+  isPromoContext.value = false
+  promoContextProduct.value = null
 }
 
 const isEditingCartItem = computed(() => editingCartItemId.value !== null)
@@ -911,76 +1000,173 @@ const applyClientPromotions = () => {
 const openPromoModal = async (promo: Promocion) => {
   selectedPromo.value = promo
   promoSelectedProducts.value = {}
+  promoItemsWithModifiers.value = []
   
   // Cargar productos disponibles para esta promoción
   const promoProds = promo.productos || []
   if (promoProds.length > 0) {
-    // La promoción tiene productos específicos vinculados
     promoProductos.value = allProducts.value.filter(p => promoProds.includes(p.id_producto))
   } else {
-    // La promoción aplica a todos los productos disponibles
     promoProductos.value = allProducts.value.filter(p => p.disponibilidad !== false && productosEnMenusActivos.value.includes(p.id_producto))
   }
   
   showPromoModal.value = true
 }
 
-const togglePromoProduct = (productId: number) => {
-  const current = promoSelectedProducts.value[productId] || 0
-  const total = Object.values(promoSelectedProducts.value).reduce((sum, qty) => sum + qty, 0)
-  
-  if (current === 0 && total >= 2) {
-    displayToast('Máximo 2 productos por promoción', 'warning')
+const openPromoProductOptions = async (product: Producto) => {
+  if (promoItemsWithModifiers.value.length >= 2) {
+    displayToast('Máximo 2 productos por promoción 2x1', 'warning')
     return
   }
+
+  isPromoContext.value = true
+  promoContextProduct.value = product
+
+  isLoadingOptions.value = true
+  const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${product.id_producto}`)
   
-  if (current === 0) {
-    promoSelectedProducts.value[productId] = 1
+  const opcionesActivas = (res.datos || []).filter((i: any) => i.activo).map((i: any) => ({
+    ...i,
+    precio_modificador: Number(i.precio_modificador || 0),
+    seleccionado: i.es_obligatorio
+  }))
+
+  if (opcionesActivas.length > 0) {
+    currentOptions.value = opcionesActivas
+    selectedProductForOptions.value = product
+    showOptionsModal.value = true
   } else {
-    delete promoSelectedProducts.value[productId]
+    promoItemsWithModifiers.value.push({ product, modifiers: [] })
+    displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
   }
+  isLoadingOptions.value = false
+}
+
+const togglePromoProduct = (productId: number) => {
+  const producto = promoProductos.value.find(p => p.id_producto === productId)
+  if (!producto) return
+
+  openPromoProductOptions(producto)
 }
 
 const confirmPromoSelection = () => {
   if (!selectedPromo.value) return
   
-  const selectedIds = Object.keys(promoSelectedProducts.value).map(Number)
-  if (selectedIds.length === 0) {
+  if (promoItemsWithModifiers.value.length === 0) {
     displayToast('Selecciona al menos un producto', 'warning')
     return
   }
-  
-  // Agregar productos con precio de promoción
+
   const promo = selectedPromo.value
-  for (const productId of selectedIds) {
-    const producto = promoProductos.value.find(p => p.id_producto === productId)
-    if (!producto) continue
-    
-    let finalPrice = producto.precio_base
-    if (promo.tipo === 'porcentaje') {
-      finalPrice = producto.precio_base * (1 - promo.valor / 100)
-    } else if (promo.tipo === 'monto') {
-      finalPrice = Math.max(0, producto.precio_base - promo.valor)
+  const promoCartItems: CartItem[] = []
+
+  if (promo.tipo === 'bogo') {
+    const items = promoItemsWithModifiers.value
+    if (items.length === 0) {
+      displayToast('Selecciona al menos un producto', 'warning')
+      return
     }
-    // bogo (2x1) se maneja diferente - precio completo
+    const item0 = items[0]!
+    const price1 = item0.product.precio_base + item0.modifiers.reduce((acc, m) => acc + m.precio_modificador, 0)
+    const price2 = items[1] ? items[1].product.precio_base + items[1].modifiers.reduce((acc, m) => acc + m.precio_modificador, 0) : 0
     
-    addDirectlyToCart(producto, [], finalPrice)
+    const maxPrice = Math.max(price1, price2)
+    const minPrice = Math.min(price1, price2)
+    const promoGroupId = Date.now()
+    const promoGroupName = promo.nombre
+
+    const item1: CartItem = {
+      cartId: promoGroupId,
+      productId: item0.product.id_producto,
+      name: item0.product.nombre_producto,
+      qty: 1,
+      basePrice: item0.product.precio_base,
+      modifiers: item0.modifiers,
+      unitTotal: maxPrice,
+      categoria: item0.product.categoria,
+      promoGroupId: promoGroupId,
+      promoGroupName: promoGroupName,
+      isPromoItem: true
+    }
+    promoCartItems.push(item1)
+
+    if (items[1]) {
+      const item1 = items[1]!
+      const item2: CartItem = {
+        cartId: promoGroupId + 1,
+        productId: item1.product.id_producto,
+        name: item1.product.nombre_producto,
+        qty: 1,
+        basePrice: item1.product.precio_base,
+        modifiers: item1.modifiers,
+        unitTotal: minPrice,
+        categoria: item1.product.categoria,
+        promoGroupId: promoGroupId,
+        promoGroupName: promoGroupName,
+        isPromoItem: true
+      }
+      promoCartItems.push(item2)
+    }
+
+    for (const item of promoCartItems) {
+      cart.value.push(item)
+    }
+    playSound('added')
+  } else {
+    const promoGroupId = Date.now()
+    const itemsArray = promoItemsWithModifiers.value
+    for (let i = 0; i < itemsArray.length; i++) {
+      const item = itemsArray[i]!
+      const modsPrice = item.modifiers.reduce((acc, m) => acc + m.precio_modificador, 0)
+      let finalPrice = item.product.precio_base + modsPrice
+      
+      if (promo.tipo === 'porcentaje') {
+        finalPrice = (item.product.precio_base + modsPrice) * (1 - promo.valor / 100)
+      } else if (promo.tipo === 'monto') {
+        finalPrice = Math.max(0, item.product.precio_base + modsPrice - promo.valor)
+      }
+      
+      const cartItem: CartItem = {
+        cartId: promoGroupId + i,
+        productId: item.product.id_producto,
+        name: item.product.nombre_producto,
+        qty: 1,
+        basePrice: item.product.precio_base,
+        modifiers: item.modifiers,
+        unitTotal: finalPrice,
+        categoria: item.product.categoria,
+        promoGroupId: promoGroupId,
+        promoGroupName: promo.nombre,
+        isPromoItem: true
+      }
+      cart.value.push(cartItem)
+    }
   }
-  
-  // Agregar la promoción a las aplicadas
+
   appliedPromociones.value.push({
     id_promocion: promo.id_promocion,
     nombre: promo.nombre,
     tipo: promo.tipo,
     valor: promo.valor
   })
-  
+
+  promoItemsWithModifiers.value = []
   showPromoModal.value = false
   selectedPromo.value = null
 }
 
 const removePromoFromCart = (idPromo: number) => {
   appliedPromociones.value = appliedPromociones.value.filter(p => p.id_promocion !== idPromo)
+}
+
+const removePromoItem = (index: number) => {
+  promoItemsWithModifiers.value.splice(index, 1)
+  displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
+}
+
+const removePromoGroup = (promoGroupId: number) => {
+  cart.value = cart.value.filter(item => item.promoGroupId !== promoGroupId)
+  displayToast('Promoción eliminada', 'success')
 }
 
 // ── CARRITO ─────────────────────────────────────────────
@@ -1249,48 +1435,78 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
             <p>El ticket está vacío</p>
           </div>
 
-          <div v-for="item in cart" :key="item.cartId" class="cart-item">
-            <div class="item-info">
-              <span class="item-name">
-                {{ item.name }}
-                <span v-if="item.isPackage" class="badge-package">PAQUETE</span>
-              </span>
-              <span class="item-unit">${{ item.unitTotal.toFixed(2) }}</span>
-              <ul v-if="item.modifiers.length > 0" class="item-mods-list">
-                <li v-for="mod in item.modifiers" :key="mod.id_ingrediente">
-                  + {{ mod.nombre_ingrediente }} <span v-if="mod.precio_modificador > 0">(+${{mod.precio_modificador}})</span>
-                </li>
-              </ul>
-              <div v-if="itemPromociones[item.cartId]?.length" class="item-promos">
-                <span v-for="promo in itemPromociones[item.cartId]" :key="promo.id_promocion" class="promo-item-tag">
-                  {{ promo.tipo === 'porcentaje' ? `${promo.valor}%` : promo.tipo === 'bogo' ? '2x1' : promo.tipo === 'monto' ? `-$${promo.valor}` : promo.nombre }}
-                </span>
+          <template v-for="entry in cartDisplay" :key="entry.type === 'group' ? entry.promoGroupId : entry.item.cartId">
+            <!-- Grupo de promoción (recuadro) -->
+            <div v-if="entry.type === 'group'" class="promo-group-box">
+              <div class="promo-group-header">
+                <span class="promo-group-badge">{{ entry.promoGroupName }}</span>
+                <span class="promo-group-total">${{ entry.items.reduce((sum, i) => sum + i.unitTotal, 0).toFixed(2) }}</span>
               </div>
-              <div v-if="item.packageSelections?.length" class="package-selections">
-                <span v-for="sel in item.packageSelections" :key="sel.id_producto" class="sel-chip">
-                  {{ sel.nombre }}
-                </span>
+              <div v-for="item in entry.items" :key="item.cartId" class="cart-item promo-item">
+                <div class="item-info">
+                  <span class="item-name">
+                    {{ item.name }}
+                    <span v-if="item.isFree" class="badge-free">2x1</span>
+                  </span>
+                  <span class="item-unit" :class="{ 'price-free': item.isFree }">
+                    {{ item.isFree ? '$0.00' : '$' + item.unitTotal.toFixed(2) }}
+                  </span>
+                  <ul v-if="item.modifiers.length > 0" class="item-mods-list">
+                    <li v-for="mod in item.modifiers" :key="mod.id_ingrediente">
+                      + {{ mod.nombre_ingrediente }} <span v-if="mod.precio_modificador > 0">(+${{mod.precio_modificador}})</span>
+                    </li>
+                  </ul>
+                </div>
+                <div class="qty-controls">
+                  <button @click="updateQty(item.cartId, -1)">−</button>
+                  <span>{{ item.qty }}</span>
+                  <button @click="updateQty(item.cartId, 1)">+</button>
+                </div>
+                <div class="item-right">
+                  <span class="item-total">${{ (item.qty * item.unitTotal).toFixed(2) }}</span>
+                  <button class="edit-btn" @click="openEditCartItemModal(item)" title="Editar ingredientes">✏️</button>
+                  <button class="delete-btn" @click="removePromoGroup(entry.promoGroupId)">🗑️</button>
+                </div>
               </div>
-              <input 
-                v-model="itemNotes[item.cartId]"
-                type="text" 
-                class="item-note-input" 
-                placeholder="Nota: sin cebolla..."
-              />
             </div>
-            
-            <div class="qty-controls">
-              <button @click="updateQty(item.cartId, -1)">−</button>
-              <span>{{ item.qty }}</span>
-              <button @click="updateQty(item.cartId, 1)">+</button>
+
+            <!-- Item individual -->
+            <div v-else class="cart-item">
+              <div class="item-info">
+                <span class="item-name">
+                  {{ entry.item.name }}
+                  <span v-if="entry.item.isPackage" class="badge-package">PAQUETE</span>
+                </span>
+                <span class="item-unit">${{ entry.item.unitTotal.toFixed(2) }}</span>
+                <ul v-if="entry.item.modifiers.length > 0" class="item-mods-list">
+                  <li v-for="mod in entry.item.modifiers" :key="mod.id_ingrediente">
+                    + {{ mod.nombre_ingrediente }} <span v-if="mod.precio_modificador > 0">(+${{mod.precio_modificador}})</span>
+                  </li>
+                </ul>
+                <div v-if="entry.item.packageSelections?.length" class="package-selections">
+                  <span v-for="sel in entry.item.packageSelections" :key="sel.id_producto" class="sel-chip">
+                    {{ sel.nombre }}
+                  </span>
+                </div>
+                <input 
+                  v-model="itemNotes[entry.item.cartId]"
+                  type="text" 
+                  class="item-note-input" 
+                  placeholder="Nota: sin cebolla..."
+                />
+              </div>
+              <div class="qty-controls">
+                <button @click="updateQty(entry.item.cartId, -1)">−</button>
+                <span>{{ entry.item.qty }}</span>
+                <button @click="updateQty(entry.item.cartId, 1)">+</button>
+              </div>
+              <div class="item-right">
+                <span class="item-total">${{ (entry.item.qty * entry.item.unitTotal).toFixed(2) }}</span>
+                <button class="edit-btn" @click="openEditCartItemModal(entry.item)" title="Editar ingredientes">✏️</button>
+                <button class="delete-btn" @click="removeFromCart(entry.item.cartId)">🗑️</button>
+              </div>
             </div>
-            
-            <div class="item-right">
-              <span class="item-total">${{ (item.qty * item.unitTotal).toFixed(2) }}</span>
-              <button class="edit-btn" @click="openEditCartItemModal(item)" title="Editar ingredientes">✏️</button>
-              <button class="delete-btn" @click="removeFromCart(item.cartId)">🗑️</button>
-            </div>
-          </div>
+          </template>
         </div>
         </div>
 
@@ -1396,14 +1612,29 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           <p class="promo-value">
             {{ selectedPromo.tipo === 'porcentaje' ? `-${selectedPromo.valor}%` : selectedPromo.tipo === 'monto' ? `-$${selectedPromo.valor}` : '2x1 (Llévate 2)' }}
           </p>
-          <p class="promo-limit">Selecciona hasta 2 productos</p>
+          <p class="promo-limit">Items seleccionados {{ totalPromoSeleccionados }}/2</p>
         </div>
+
+        <!-- Items seleccionados -->
+        <div v-if="promoItemsWithModifiers.length > 0" class="promo-selected-items">
+          <div v-for="(item, idx) in promoItemsWithModifiers" :key="idx" class="selected-item-card">
+            <div class="selected-item-info">
+              <span class="selected-item-name">{{ item.product.nombre_producto }}</span>
+              <span v-if="item.modifiers.length > 0" class="selected-item-mods">
+                {{ item.modifiers.map(m => m.nombre_ingrediente).join(', ') }}
+              </span>
+              <span v-else class="selected-item-mods">Sin modificaciones</span>
+            </div>
+            <button class="remove-item-btn" @click="removePromoItem(idx)">✕</button>
+          </div>
+        </div>
+
         <div class="promo-products-list">
           <div 
             v-for="prod in promoProductos" 
             :key="prod.id_producto"
             class="promo-product-item"
-            :class="{ selected: promoSelectedProducts[prod.id_producto] }"
+            :class="{ disabled: promoItemsWithModifiers.length >= 2 }"
             @click="togglePromoProduct(prod.id_producto)"
           >
             <div class="promo-prod-info">
@@ -1424,7 +1655,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         </div>
         <div class="modal-actions">
           <button class="btn btn--secondary" @click="showPromoModal = false">Cancelar</button>
-          <button class="btn btn--primary" @click="confirmPromoSelection">
+          <button class="btn btn--primary" @click="confirmPromoSelection" :disabled="totalPromoSeleccionados < 1">
             Agregar ({{ totalPromoSeleccionados }})
           </button>
         </div>
@@ -1569,8 +1800,16 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .item-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .item-name { font-size: 14px; font-weight: 600; color: #111827; display: flex; align-items: center; gap: 6px; }
 .badge-package { font-size: 9px; background: #f3f4f6; color: #6b7280; padding: 2px 4px; border-radius: 3px; font-weight: 700; }
+.badge-free { font-size: 9px; background: #fce7f3; color: #db2777; padding: 2px 4px; border-radius: 3px; font-weight: 700; }
 .item-unit { font-size: 12px; color: #6b7280; }
+.item-unit.price-free { color: #9ca3af; text-decoration: line-through; }
 .item-mods-list { margin: 2px 0 0 0; padding-left: 12px; font-size: 11px; color: #9ca3af; }
+
+.promo-group-box { border: 2px solid #fcd34d; border-radius: 10px; padding: 10px; margin-bottom: 8px; background: #fffbeb; }
+.promo-group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px dashed #fcd34d; }
+.promo-group-badge { font-size: 11px; font-weight: 700; background: #fcd34d; color: #92400e; padding: 3px 8px; border-radius: 4px; }
+.promo-group-total { font-size: 14px; font-weight: 700; color: #92400e; }
+.promo-item { border-bottom: 1px solid #fce7f3 !important; padding-bottom: 8px !important; margin-bottom: 4px !important; }
 .item-promos { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; padding-left: 12px; }
 .promo-item-tag { font-size: 10px; background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: 600; border: 1px solid #fcd34d; }
 .package-selections { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
@@ -1648,10 +1887,19 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .promo-desc { font-size: 13px; color: #6b7280; margin: 4px 0; }
 .promo-value { font-size: 24px; font-weight: 700; color: #16a34a; margin: 8px 0; }
 .promo-limit { font-size: 12px; color: #6b7280; margin-bottom: 12px; }
+
+.promo-selected-items { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 10px; background: #ecfdf5; border: 2px solid #10b981; border-radius: 8px; }
+.selected-item-card { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #fff; border: 1px solid #d1fae5; border-radius: 6px; }
+.selected-item-info { display: flex; flex-direction: column; gap: 2px; }
+.selected-item-name { font-size: 14px; font-weight: 600; color: #111827; }
+.selected-item-mods { font-size: 11px; color: #6b7280; }
+.remove-item-btn { background: none; border: none; color: #dc2626; font-size: 16px; cursor: pointer; padding: 4px 8px; }
+
 .promo-products-list { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .promo-product-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #f9fafb; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
 .promo-product-item:hover { border-color: #002D72; }
 .promo-product-item.selected { border-color: #16a34a; background: #ecfdf5; }
+.promo-product-item.disabled { opacity: 0.5; cursor: not-allowed; }
 .promo-prod-info { display: flex; flex-direction: column; }
 .promo-prod-name { font-size: 14px; font-weight: 600; color: #111827; }
 .promo-prod-cat { font-size: 12px; color: #6b7280; }
