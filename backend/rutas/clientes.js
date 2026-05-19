@@ -233,8 +233,8 @@ router.delete('/beneficio/eliminar/:id', verificarToken, async (req, res) => {
 router.put('/beneficio/modificar/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const { nombre, descripcion } = req.body;
-
+        const { nombre, descripcion,activo } = req.body;
+        const valorActivo = (activo !== undefined) ? activo : null;
         const query = 'SELECT fn_actualizar_tipo_beneficio($1, $2, $3) AS resultado';
         const values = [id, nombre || null, descripcion || null];
 
