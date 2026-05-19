@@ -127,7 +127,7 @@ async function validarTokenConBackend(): Promise<boolean> {
   if (!token) return false
 
   try {
-    const res = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}/api/usuarios/perfil`, {
+    const res = await fetch(`${import.meta.env.RENDER_API_URL || 'https://coffe-code-s7t9.onrender.com'}/api/usuarios/perfil`, {
       headers: { 'auth-token': token }
     })
     return res.ok
