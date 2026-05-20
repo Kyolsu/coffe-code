@@ -148,12 +148,15 @@ router.post('/beneficio/registrar', async (req, res) => {
         return res.status(400).json({ status: "error", mensaje: "registre el nombre del beneficio" });
     }
     try {
-        const query = 'SELECT * FROM alta_beneficio($1, $2)';
-        const result = await db.query(query, [nombre, descripcion]);
-        const { mensaje, exito } = result.rows[0];
+        const query = 'SELECT fn_alta_tipo_beneficio($1, $2) AS id_tipo_beneficio';
+        const result = await db.query(query, [nombre, descripcion || null]);
+        const idRetornado = result.rows[0].id_tipo_beneficio;
 
-        res.status(exito ? 201 : 400).json({ status: exito ? "ok" : "error", mensaje });
+        res.status(201).json({ status: "ok", mensaje: "Tipo de beneficio registrado correctamente", id_tipo_beneficio: idRetornado });
     } catch (err) {
+        if (err.message.includes('ya existe') || err.message.includes('El tipo de beneficio ya existe')) {
+            return res.status(400).json({ status: "error", mensaje: "El tipo de beneficio ya existe" });
+        }
         res.status(500).json({ status: "error", mensaje: "Error interno" });
     }
 });
@@ -161,7 +164,7 @@ router.post('/beneficio/registrar', async (req, res) => {
 // Mostrar beneficios
 router.get('/beneficio/mostrar', async (req, res) => {
     try {
-        const query = 'SELECT id_tipo_beneficio, nombre, descripcion FROM tipo_beneficio ORDER BY id_tipo_beneficio ASC';
+        const query = 'SELECT id_tipo_beneficio, nombre, descripcion, activo FROM tipo_beneficio ORDER BY id_tipo_beneficio ASC';
         
         const result = await db.query(query);
 
@@ -190,38 +193,30 @@ router.get('/beneficio/mostrar', async (req, res) => {
     }
 });
 
-// Elimina un beneficio específico por su ID
+// Elimina un beneficio específico por su ID (soft delete)
 router.delete('/beneficio/eliminar/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const query = 'DELETE FROM tipo_beneficio WHERE id_tipo_beneficio = $1 RETURNING *';
+        const query = 'SELECT fn_baja_tipo_beneficio($1) AS resultado';
         const result = await db.query(query, [id]);
+        const mensajeRecibido = result.rows[0].resultado;
 
-        if (result.rowCount === 0) {
+        if (mensajeRecibido === 'No existe el tipo de beneficio') {
             return res.status(404).json({
                 status: "error",
-                mensaje: "No se encontró el beneficio con ese ID"
+                mensaje: mensajeRecibido
             });
         }
 
         res.json({
             status: "ok",
-            mensaje: `Beneficio '${result.rows[0].nombre}' eliminado correctamente`,
-            datos_eliminados: result.rows[0]
+            mensaje: mensajeRecibido,
+            id_desactivado: id
         });
 
     } catch (err) {
         console.error("Error al eliminar beneficio:", err.message);
-        
-        // Error en caso de que el beneficio se encuentre en otras tablas
-        if (err.code === '23503') {
-            return res.status(400).json({
-                status: "error",
-                mensaje: "No se puede eliminar este beneficio porque ya está asignado a algunos clientes"
-            });
-        }
-
         res.status(500).json({ 
             status: "error", 
             mensaje: "Error interno al eliminar el beneficio" 
@@ -233,10 +228,9 @@ router.delete('/beneficio/eliminar/:id', verificarToken, async (req, res) => {
 router.put('/beneficio/modificar/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const { nombre, descripcion,activo } = req.body;
-        const valorActivo = (activo !== undefined) ? activo : null;
-        const query = 'SELECT fn_actualizar_tipo_beneficio($1, $2, $3) AS resultado';
-        const values = [id, nombre || null, descripcion || null];
+        const { nombre, descripcion, activo } = req.body;
+        const query = 'SELECT fn_actualizar_tipo_beneficio($1, $2, $3, $4) AS resultado';
+        const values = [id, nombre || null, descripcion || null, activo !== undefined ? activo : null];
 
         const result = await db.query(query, values);
         const mensajeRecibido = result.rows[0].resultado;
@@ -255,7 +249,7 @@ router.put('/beneficio/modificar/:id', verificarToken, async (req, res) => {
         res.json({
             status: "ok",
             mensaje: mensajeRecibido,
-            datos_actualizados: { id, nombre, descripcion }
+            datos_actualizados: { id, nombre, descripcion, activo }
         });
 
     } catch (err) {
