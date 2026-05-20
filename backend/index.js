@@ -23,19 +23,15 @@ const app = express();
 
 // MIDDLEWARES (Limpios y sin repeticiones)
 app.use(express.json());
-app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    return res.sendStatus(200);
-  }
-  next();
-});
+const origenesPermitidos = [
+  'http://localhost:5173', 
+  'http://localhost:5174', 
+  'https://coffe-code-psi.vercel.app', // Tu dominio EXACTO de Vercel
+  'https://coffe-code-s7t9.onrender.com' // Tu dominio EXACTO de Render
+];
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'https://*.vercel.app', 'https://coffe-code-*.onrender.com'],
-  methods: ["GET", "POST", "PUT", "DELETE"],
+  origin: origenesPermitidos,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   credentials: true
 }));
 
@@ -45,7 +41,7 @@ const server = http.createServer(app);
 //INICIALIZACIÓN DE SOCKET.IO
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:5174', 'https://*.vercel.app', 'https://coffe-code-*.onrender.com'],
+    origin: origenesPermitidos, // Usamos la misma lista limpia aquí
     methods: ["GET", "POST"],
     credentials: true
   }
