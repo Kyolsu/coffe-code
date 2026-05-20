@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { API_URL } from '../config/api'
 
 // ── VISTAS Y LAYOUTS ────────────────────────────────────────────────────────
 import MainLayout          from '../layouts/MainLayout.vue' // <-- Importa tu nuevo layout
@@ -132,7 +133,7 @@ async function validarTokenConBackend(): Promise<boolean> {
   if (!token) return false
 
   try {
-    const res = await fetch(`${import.meta.env.RENDER_API_URL || 'https://coffe-code-s7t9.onrender.com'}/api/usuarios/perfil`, {
+    const res = await fetch(`${API_URL}/api/usuarios/perfil`, {
       headers: { 'auth-token': token }
     })
     return res.ok

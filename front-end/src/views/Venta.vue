@@ -1088,6 +1088,7 @@ const toggleRfidListening = async () => {
     displayToast('Escuchando RFID...', 'warning')
 
     socket = connect()
+    socket.off('rfid_detectado')
     socket.on('rfid_detectado', async (data: { uid: string }) => {
       rfidInput.value = data.uid
       rfidListening.value = false

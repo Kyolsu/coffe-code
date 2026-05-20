@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
-import API_URL from '../config/api'
-import Sidebar from '../components/Sidebar.vue'
+import { API_URL } from '../config/api'
 
 const API_BASE = `${API_URL}/api`
 const authStore = useAuthStore()
@@ -13,6 +12,13 @@ interface Venta {
   total: number
   fecha: string
   estado_orden: string
+  id_cliente: number | null
+  nombre_cliente: string | null
+}
+
+interface Cliente {
+  id_cliente: number
+  nombre: string
 }
 
 interface StatsDia {
@@ -41,25 +47,48 @@ const fetchConToken = async (endpoint: string, method = 'GET', body: any = null)
   }
 }
 
+const fetchSinToken = async (endpoint: string) => {
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`)
+    const data = await response.json()
+    return data
+  } catch (err) {
+    console.error(`Error en ${endpoint}:`, err)
+    return { status: 'error', datos: [] }
+  }
+}
+
 // ── ESTADO ─────────────────────────────
 const isLoading = ref(false)
 const ventas = ref<Venta[]>([])
+const clientes = ref<Cliente[]>([])
 const filtro = ref<'dia' | 'semana' | 'mes'>('semana')
+const filtroCliente = ref<string>('todos')
 
 // ── CARGA DE DATOS ─────────────────────
 const loadData = async () => {
   isLoading.value = true
-  const res = await fetchConToken('/ordenes/mostrar')
 
-  if (res.status === 'ok' && res.datos) {
-    ventas.value = res.datos
+  const [ordenesRes, clientesRes] = await Promise.all([
+    fetchConToken('/ordenes/mostrar'),
+    fetchSinToken('/clientes/mostrar-activos')
+  ])
+
+  if (ordenesRes.status === 'ok' && ordenesRes.datos) {
+    ventas.value = ordenesRes.datos
       .filter((o: any) => o.estado_orden?.toLowerCase() !== 'cancelada' && o.estado_orden?.toLowerCase() !== 'cancelado')
       .map((o: any) => ({
         id_orden: o.id_orden,
-        total: o.total || 0,
+        total: Number(o.total) || 0,
         fecha: o.fecha_creacion ? o.fecha_creacion.split('T')[0] : new Date().toISOString().split('T')[0],
-        estado_orden: o.estado_orden
+        estado_orden: o.estado_orden,
+        id_cliente: o.id_cliente || null,
+        nombre_cliente: o.cliente || null
       }))
+  }
+
+  if (clientesRes.status === 'ok' && clientesRes.datos) {
+    clientes.value = clientesRes.datos
   }
 
   isLoading.value = false
@@ -75,9 +104,22 @@ const ventasFiltradas = computed(() => {
     fecha.setHours(0, 0, 0, 0)
     const diff = (hoy.getTime() - fecha.getTime()) / (1000 * 3600 * 24)
 
-    if (filtro.value === 'dia') return diff <= 1
-    if (filtro.value === 'semana') return diff <= 7
-    if (filtro.value === 'mes') return diff <= 30
+    if (filtro.value === 'dia') {
+      if (diff > 1) return false
+    }
+    if (filtro.value === 'semana') {
+      if (diff > 7) return false
+    }
+    if (filtro.value === 'mes') {
+      if (diff > 30) return false
+    }
+
+    if (filtroCliente.value === 'sin_cliente') {
+      return v.id_cliente === null
+    }
+    if (filtroCliente.value !== 'todos') {
+      return v.id_cliente === Number(filtroCliente.value)
+    }
 
     return true
   }).sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
@@ -173,6 +215,14 @@ onMounted(() => {
         </div>
 
         <div class="filters">
+          <select v-model="filtroCliente" class="filtro-cliente">
+            <option value="todos">Todos los clientes</option>
+            <option value="sin_cliente">Sin registro</option>
+            <option v-for="c in clientes" :key="c.id_cliente" :value="String(c.id_cliente)">
+              {{ c.nombre }}
+            </option>
+          </select>
+
           <button
             :class="{ active: filtro === 'dia' }"
             @click="filtro = 'dia'"
@@ -289,6 +339,7 @@ onMounted(() => {
             <tr>
               <th>ID Orden</th>
               <th>Fecha</th>
+              <th>Cliente</th>
               <th>Estado</th>
               <th>Total</th>
             </tr>
@@ -298,6 +349,7 @@ onMounted(() => {
             <tr v-for="v in ventasFiltradas.slice(0, 20)" :key="v.id_orden">
               <td>#{{ v.id_orden }}</td>
               <td>{{ new Date(v.fecha).toLocaleDateString('es-MX') }}</td>
+              <td>{{ v.nombre_cliente || '—' }}</td>
               <td>
                 <span :class="['estado-badge', v.estado_orden?.toLowerCase()]">
                   {{ v.estado_orden }}
@@ -366,6 +418,24 @@ onMounted(() => {
 .filters {
   display: flex;
   gap: var(--espacio-2, 8px);
+  align-items: center;
+}
+
+.filtro-cliente {
+  padding: var(--espacio-2, 8px) var(--espacio-3, 12px);
+  background: color-mix(in srgb, var(--tenant-fondo) 95%, black 5%);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
+  color: var(--tenant-texto);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--tenant-fuente, sans-serif);
+  font-size: var(--font-size-sm, 13px);
+  min-width: 140px;
+}
+
+.filtro-cliente option {
+  background: var(--tenant-fondo);
+  color: var(--tenant-texto);
 }
 
 .filters button {

@@ -1,10 +1,14 @@
 import { fileURLToPath, URL } from 'node:url'
-
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
-// https://vite.dev/config/
+const LOCAL_URL = 'http://localhost:3000'
+const CLOUD_URL = 'https://coffe-code-s7t9.onrender.com'
+const USE_CLOUD = process.env.VITE_USE_CLOUD !== 'false'
+
+const proxyTarget = USE_CLOUD ? CLOUD_URL : LOCAL_URL
+
 export default defineConfig({
   plugins: [
     vue(),
@@ -18,7 +22,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://coffe-code-s7t9.onrender.com',
+        target: proxyTarget,
         changeOrigin: true,
       },
     },
