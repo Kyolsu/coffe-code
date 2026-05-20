@@ -72,7 +72,7 @@ interface Promocion {
   id_promocion: number
   nombre: string
   descripcion: string
-  tipo: 'porcentaje' | 'monto' | 'bogo'
+  tipo: 'porcentaje' | 'monto' | 'bogo' | 'descuento_fijo'
   valor: number
   es_temporal: boolean
   activo: boolean
@@ -801,7 +801,8 @@ const confirmOptionsAndAddToCart = () => {
       product: selectedProductForOptions.value,
       modifiers: [...selectedModifiers]
     })
-    displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
+    const maxItems = selectedPromo.value?.tipo === 'descuento_fijo' ? 1 : 2
+    displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/${maxItems}`, 'success')
     isPromoContext.value = false
     promoContextProduct.value = null
     
@@ -1250,9 +1251,16 @@ const openPromoModal = async (promo: Promocion) => {
 }
 
 const openPromoProductOptions = async (product: Producto) => {
-  if (promoItemsWithModifiers.value.length >= 2) {
-    displayToast('Máximo 2 productos por promoción 2x1', 'warning')
-    return
+  if (selectedPromo.value?.tipo === 'descuento_fijo') {
+    if (promoItemsWithModifiers.value.length >= 1) {
+      displayToast('Máximo 1 producto para descuento gratis', 'warning')
+      return
+    }
+  } else {
+    if (promoItemsWithModifiers.value.length >= 2) {
+      displayToast('Máximo 2 productos por promoción 2x1', 'warning')
+      return
+    }
   }
 
   isPromoContext.value = true
@@ -1274,7 +1282,8 @@ const openPromoProductOptions = async (product: Producto) => {
     showOptionsModal.value = true
   } else {
     promoItemsWithModifiers.value.push({ product, modifiers: [] })
-    displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
+    const maxItems = selectedPromo.value?.tipo === 'descuento_fijo' ? 1 : 2
+    displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/${maxItems}`, 'success')
     showPromoModal.value = true
   }
   isLoadingOptions.value = false
@@ -1350,6 +1359,29 @@ const confirmPromoSelection = () => {
       cart.value.push(item)
     }
     playSound('added')
+  } else if (promo.tipo === 'descuento_fijo') {
+    // descuento_fijo: solo 1 producto gratis (unitTotal = 0)
+    if (promoItemsWithModifiers.value.length > 1) {
+      displayToast('Máximo 1 producto para descuento gratis', 'warning')
+      return
+    }
+    const item0 = promoItemsWithModifiers.value[0]!
+    const promoGroupId = Date.now()
+    const cartItem: CartItem = {
+      cartId: promoGroupId,
+      productId: item0.product.id_producto,
+      name: item0.product.nombre_producto,
+      qty: 1,
+      basePrice: item0.product.precio_base,
+      modifiers: item0.modifiers,
+      unitTotal: 0, // gratis
+      categoria: item0.product.categoria,
+      promoGroupId: promoGroupId,
+      promoGroupName: promo.nombre,
+      isPromoItem: true
+    }
+    cart.value.push(cartItem)
+    playSound('added')
   } else {
     const promoGroupId = Date.now()
     const itemsArray = promoItemsWithModifiers.value
@@ -1409,7 +1441,8 @@ const removeAppliedPromo = (idPromo: number) => {
 
 const removePromoItem = (index: number) => {
   promoItemsWithModifiers.value.splice(index, 1)
-  displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
+  const maxItems = selectedPromo.value?.tipo === 'descuento_fijo' ? 1 : 2
+  displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/${maxItems}`, 'success')
 }
 
 const removePromoGroup = (promoGroupId: number) => {
@@ -1981,9 +2014,9 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           <h3>{{ selectedPromo.nombre }}</h3>
           <p class="promo-desc">{{ selectedPromo.descripcion }}</p>
           <p class="promo-value">
-            {{ selectedPromo.tipo === 'porcentaje' ? `-${selectedPromo.valor}%` : selectedPromo.tipo === 'monto' ? `-$${selectedPromo.valor}` : '2x1 (Llévate 2)' }}
+            {{ selectedPromo.tipo === 'porcentaje' ? `-${selectedPromo.valor}%` : selectedPromo.tipo === 'monto' ? `-$${selectedPromo.valor}` : selectedPromo.tipo === 'descuento_fijo' ? 'GRATIS' : '2x1 (Llévate 2)' }}
           </p>
-          <p class="promo-limit">Items seleccionados {{ totalPromoSeleccionados }}/2</p>
+          <p class="promo-limit">Items seleccionados {{ totalPromoSeleccionados }}/{{ selectedPromo.tipo === 'descuento_fijo' ? 1 : 2 }}</p>
         </div>
 
         <!-- Items seleccionados -->

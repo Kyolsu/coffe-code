@@ -204,6 +204,8 @@ const promoCategoriasSeleccionadas = ref<string[]>([])
 const promoTipoAplicacion = ref<'general' | 'registrados' | 'especifico'>('general')
 const allClienteIds = ref<number[]>([])     // IDs de todos los clientes (modo "registrados")
 const loadedSpecificIds = ref<number[]>([]) // IDs específicos cargados de BD (para restaurarlos al volver a específico)
+const descuentoFijoTipo = ref<'producto' | 'paquete'>('producto')
+const formData = ref<Record<string, any>>({})
 
 // Variables para menú - productos y paquetes vinculados
 const menuProductosSeleccionados = ref<number[]>([])
@@ -273,6 +275,31 @@ watch(promoTipoAplicacion, (newVal, oldVal) => {
   }
 })
 
+// Cuando cambia el tipo de promoción, limpiar selecciones relevantes
+watch(() => formData.value.tipo, (newTipo, oldTipo) => {
+  if (newTipo === 'descuento_fijo') {
+    // Al cambiar a descuento_fijo, limpiar el otro tipo de selección
+    if (descuentoFijoTipo.value === 'producto') {
+      promoPaquetesSeleccionados.value = []
+    } else {
+      promoProductosSeleccionados.value = []
+    }
+  } else if (oldTipo === 'descuento_fijo') {
+    // Al salir de descuento_fijo, limpiar selecciones descuento_fijo
+    promoProductosSeleccionados.value = []
+    promoPaquetesSeleccionados.value = []
+  }
+})
+
+// Cuando cambia entre producto/paquete en descuento_fijo, limpiar el otro
+watch(descuentoFijoTipo, (newVal) => {
+  if (newVal === 'producto') {
+    promoPaquetesSeleccionados.value = []
+  } else {
+    promoProductosSeleccionados.value = []
+  }
+})
+
 const removeGrupo = (index: number) => {
   paqueteGrupos.value.splice(index, 1)
 }
@@ -310,7 +337,6 @@ const setTab = (tabId: string) => {
 // ── LÓGICA DEL MODAL Y CRUD (CREAR/EDITAR) ───────────────────────────────────
 const showModal = ref(false)
 const modalType = ref('')
-const formData = ref<Record<string, any>>({})
 const isSubmitting = ref(false)
 const isEditing = ref(false)
 const editingId = ref<string | number | null>(null)
@@ -550,6 +576,7 @@ else if (type === 'promocion') {
     if (tipoNorm === 'porcentaje') tipoNorm = 'descuento'
     else if (tipoNorm === 'bogo' || tipoNorm === '2x1' || tipoNorm === '2 x 1') tipoNorm = '2x1'
     else if (tipoNorm === 'monto' || tipoNorm === 'fijo' || tipoNorm === '固定') tipoNorm = 'fijo'
+    else if (tipoNorm === 'descuento_fijo' || tipoNorm === 'descuento fijo') tipoNorm = 'descuento_fijo'
     console.log('DEBUG - tipo_norm normalized:', tipoNorm)
     formData.value.tipo = tipoNorm
     
@@ -632,9 +659,12 @@ else if (type === 'promocion') {
       if (resPaqPromo.datos) {
         const paquetesPromo = resPaqPromo.datos.filter((pp: any) => pp.id_promocion === promoId)
         promoPaquetesSeleccionados.value = paquetesPromo.map((pp: any) => pp.id_paquete)
-        
+
         if (paquetesPromo.length > 0) {
           promoAplicarPaquetes.value = true
+          descuentoFijoTipo.value = 'paquete'
+        } else if (formData.value.tipo === 'descuento_fijo') {
+          descuentoFijoTipo.value = 'producto'
         }
       }
     } catch (e) {
@@ -1875,10 +1905,8 @@ onMounted(() => {
                 <label>Tipo de Promoción:</label>
                 <select v-model="formData.tipo" required class="form-select">
                   <option disabled value="">Selecciona...</option>
-                  <option value="descuento">Descuento (%)</option>
                   <option value="2x1">2x1</option>
-                  <option value="fijo">Precio Fijo</option>
-                  <option value="otro">Otro</option>
+                  <option value="descuento_fijo">Descuento Fijo (100% gratis)</option>
                 </select>
               </div>
               <div class="form-group">
@@ -1888,7 +1916,7 @@ onMounted(() => {
             </div>
 
             <!-- Ámbito de aplicación -->
-            <div class="form-group">
+            <div v-if="formData.tipo !== 'descuento_fijo'" class="form-group">
               <label>Ámbito de aplicación:</label>
               <div class="scope-options">
                 <label class="radio-label">
@@ -1902,8 +1930,23 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Selector de productos específicos -->
-            <div v-if="promoScope === 'productos'" class="productos-grupo">
+            <!-- Selector para descuento_fijo (producto único o paquete único) -->
+            <div v-if="formData.tipo === 'descuento_fijo'" class="form-group">
+              <label>¿Qué será gratis?</label>
+              <div class="scope-options">
+                <label class="radio-label">
+                  <input type="radio" v-model="descuentoFijoTipo" value="producto" :disabled="promoPaquetesSeleccionados.length > 0" />
+                  Un producto específico
+                </label>
+                <label class="radio-label">
+                  <input type="radio" v-model="descuentoFijoTipo" value="paquete" :disabled="promoProductosSeleccionados.length > 0" />
+                  Un paquete completo
+                </label>
+              </div>
+            </div>
+
+            <!-- Selector de productos específicos (no para descuento_fijo en modo paquete) -->
+            <div v-if="promoScope === 'productos' && formData.tipo !== 'descuento_fijo'" class="productos-grupo">
               <div class="productos-filtro">
                 <label>Filtrar por categoría:</label>
                 <select v-model="promoCategoriaFiltro" class="form-select" style="width: auto; min-width: 150px;">
@@ -1920,8 +1963,37 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Selector de categorías -->
-            <div v-if="promoScope === 'categorias'" class="form-group">
+            <!-- Selector de producto único para descuento_fijo -->
+            <div v-if="formData.tipo === 'descuento_fijo' && descuentoFijoTipo === 'producto'" class="productos-grupo">
+              <div class="productos-filtro">
+                <label>Filtrar por categoría:</label>
+                <select v-model="promoCategoriaFiltro" class="form-select" style="width: auto; min-width: 150px;">
+                  <option value="">Todas las categorías</option>
+                  <option v-for="cat in categoriasUnicas" :key="cat" :value="cat">{{ cat }}</option>
+                </select>
+              </div>
+              <div class="productos-list">
+                <label v-for="prod in getPromoProductosFiltrados(promoCategoriaFiltro)" :key="prod.id_producto" class="producto-option">
+                  <input type="radio" :value="prod.id_producto" v-model="promoProductosSeleccionados" :name="`df-prod-${prod.id_producto}`" />
+                  <span>{{ prod.nombre_producto }}</span>
+                  <span class="prod-cat">({{ prod.categoria }})</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Selector de paquete único para descuento_fijo -->
+            <div v-if="formData.tipo === 'descuento_fijo' && descuentoFijoTipo === 'paquete'" class="productos-grupo">
+              <div class="productos-list">
+                <label v-for="paq in paquetes" :key="paq.id || paq.id_paquete" class="producto-option">
+                  <input type="radio" :value="paq.id || paq.id_paquete" v-model="promoPaquetesSeleccionados" :name="`df-paq-${paq.id || paq.id_paquete}`" />
+                  <span>{{ paq.nombre_paquete || paq.nombre || paq.paquete }}</span>
+                  <span class="prod-cat">(${{ paq.precio }})</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Selector de categorías (no para descuento_fijo) -->
+            <div v-if="promoScope === 'categorias' && formData.tipo !== 'descuento_fijo'" class="form-group">
               <label>Selecciona categorías:</label>
               <div class="categorias-selector">
                 <label v-for="cat in categoriasUnicas" :key="cat" class="categoria-checkbox">
