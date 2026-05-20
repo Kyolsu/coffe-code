@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import API_URL from '../config/api'
 
@@ -202,6 +202,8 @@ const promoCategoriaFiltro = ref<string>('')
 const promoScope = ref<'todos' | 'productos' | 'categorias'>('todos')
 const promoCategoriasSeleccionadas = ref<string[]>([])
 const promoTipoAplicacion = ref<'general' | 'registrados' | 'especifico'>('general')
+const allClienteIds = ref<number[]>([])     // IDs de todos los clientes (modo "registrados")
+const loadedSpecificIds = ref<number[]>([]) // IDs específicos cargados de BD (para restaurarlos al volver a específico)
 
 // Variables para menú - productos y paquetes vinculados
 const menuProductosSeleccionados = ref<number[]>([])
@@ -228,6 +230,7 @@ const loadProductosParaPaquetes = async () => {
 const loadClientesParaPromocion = async () => {
   const res = await fetchConToken('/clientes/mostrar-activos')
   clientesDisponibles.value = res.datos || []
+  allClienteIds.value = (res.datos || []).map((c: any) => c.id_cliente || c.id)
 }
 
 const filteredClientes = computed(() => {
@@ -252,6 +255,23 @@ const paquetesActivos = computed(() => {
 const addGrupo = () => {
   paqueteGrupos.value.push({ nombre: '', obligatorio: true, cantidad: 1, productos: [], categoriaFiltro: '' })
 }
+
+// Cuando cambia el tipo de aplicación, manejar selectedClientes
+watch(promoTipoAplicacion, (newVal, oldVal) => {
+  if (oldVal === 'especifico' && newVal === 'registrados') {
+    // Guardar los IDs específicos para poder restaurarlos
+    loadedSpecificIds.value = [...selectedClientes.value]
+    // "Marcar todos" usando allClienteIds
+    selectedClientes.value = [...allClienteIds.value]
+  } else if (oldVal === 'registrados' && newVal === 'especifico') {
+    // Restaurar los IDs específicos que estaban cargados
+    selectedClientes.value = [...loadedSpecificIds.value]
+  } else if (newVal === 'general') {
+    // Limpiar selección
+    selectedClientes.value = []
+    loadedSpecificIds.value = []
+  }
+})
 
 const removeGrupo = (index: number) => {
   paqueteGrupos.value.splice(index, 1)
@@ -626,15 +646,20 @@ else if (type === 'promocion') {
       const resCliPromo = await fetchConToken('/promociones/clientes/mostrar')
       if (resCliPromo.datos) {
         const clientesPromo = resCliPromo.datos.filter((cp: any) => cp.id_promocion === promoId)
-        selectedClientes.value = clientesPromo.map((cp: any) => cp.id_cliente)
-        
+
         // Determinar tipo de aplicación
         if (clientesPromo.length > 0) {
           promoTipoAplicacion.value = 'especifico'
+          selectedClientes.value = clientesPromo.map((cp: any) => cp.id_cliente)
+          loadedSpecificIds.value = [...selectedClientes.value]
         } else if (formData.value.solo_clientes) {
           promoTipoAplicacion.value = 'registrados'
+          selectedClientes.value = []
+          loadedSpecificIds.value = []
         } else {
           promoTipoAplicacion.value = 'general'
+          selectedClientes.value = []
+          loadedSpecificIds.value = []
         }
       } else {
         // Si no hay datos de clientes, determinar por el flag solo_clientes
@@ -643,11 +668,15 @@ else if (type === 'promocion') {
         } else {
           promoTipoAplicacion.value = 'general'
         }
+        selectedClientes.value = []
+        loadedSpecificIds.value = []
       }
     } catch (e) {
       console.error('Error al cargar clientes de promoción', e)
       // Por defecto, si hay error, poner como general
       promoTipoAplicacion.value = formData.value.solo_clientes ? 'registrados' : 'general'
+      selectedClientes.value = []
+      loadedSpecificIds.value = []
     }
   }
 
@@ -1099,7 +1128,7 @@ const handleSubmit = async () => {
           // Desvincular productos que ya no están seleccionados
           for (const idProd of productosActuales) {
             if (!promoProductosSeleccionados.value.includes(idProd)) {
-              await fetchConToken('/promociones/productos/desvincular', 'POST', {
+              await fetchConToken('/promociones/productos/desvincular', 'DELETE', {
                 id_promocion: editingId.value,
                 id_producto: idProd
               })
@@ -1123,7 +1152,7 @@ const handleSubmit = async () => {
           
           for (const idPaq of paquetesActuales) {
             if (!promoPaquetesSeleccionados.value.includes(idPaq)) {
-              await fetchConToken('/promociones/paquetes/desvincular', 'POST', {
+              await fetchConToken('/promociones/paquetes/desvincular', 'DELETE', {
                 id_promocion: editingId.value,
                 id_paquete: idPaq
               })
@@ -1138,28 +1167,44 @@ const handleSubmit = async () => {
             }
           }
           
-          // Actualizar clientes vinculados
-          const resCliActual = await fetchConToken('/promociones/clientes/mostrar')
-          const clientesActuales = resCliActual.datos 
-            ? resCliActual.datos.filter((cp: any) => cp.id_promocion === editingId.value).map((cp: any) => cp.id_cliente)
-            : []
-          
-          for (const idCli of clientesActuales) {
-            if (!selectedClientes.value.includes(idCli)) {
-              await fetchConToken('/promociones/clientes/desvincular', 'POST', {
+          // Actualizar clientes vinculados SOLO si es modo específico
+          if (promoTipoAplicacion.value === 'especifico') {
+            const resCliActual = await fetchConToken('/promociones/clientes/mostrar')
+            const clientesActuales = resCliActual.datos
+              ? resCliActual.datos.filter((cp: any) => cp.id_promocion === editingId.value).map((cp: any) => cp.id_cliente)
+              : []
+
+            for (const idCli of clientesActuales) {
+              if (!selectedClientes.value.includes(idCli)) {
+                await fetchConToken('/promociones/clientes/desvincular', 'DELETE', {
+                  id_promocion: editingId.value,
+                  id_cliente: idCli
+                })
+              }
+            }
+            for (const idCli of selectedClientes.value) {
+              if (!clientesActuales.includes(idCli)) {
+                await fetchConToken('/promociones/clientes/vincular', 'POST', {
+                  id_promocion: editingId.value,
+                  id_cliente: idCli
+                })
+              }
+            }
+          } else {
+            // Modo general o registrados: desvincular todos los clientes específicos
+            const resCliActual = await fetchConToken('/promociones/clientes/mostrar')
+            const clientesActuales = resCliActual.datos
+              ? resCliActual.datos.filter((cp: any) => cp.id_promocion === editingId.value).map((cp: any) => cp.id_cliente)
+              : []
+
+            for (const idCli of clientesActuales) {
+              await fetchConToken('/promociones/clientes/desvincular', 'DELETE', {
                 id_promocion: editingId.value,
                 id_cliente: idCli
               })
             }
           }
-          for (const idCli of selectedClientes.value) {
-            if (!clientesActuales.includes(idCli)) {
-              await fetchConToken('/promociones/clientes/vincular', 'POST', {
-                id_promocion: editingId.value,
-                id_cliente: idCli
-              })
-            }
-          }
+          // Para 'registrados' y 'general', solo se actualiza el flag solo_clientes en la promoción
         } catch (e) {
           console.error('Error al actualizar datos de promoción', e)
         }

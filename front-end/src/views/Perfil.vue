@@ -167,7 +167,7 @@ onMounted(fetchPerfil)
       </div>
 
       <div class="watermark">
-        <span>Software por</span>
+        <span>Software</span>
         <strong>CoffeeCode</strong>
       </div>
     </main>

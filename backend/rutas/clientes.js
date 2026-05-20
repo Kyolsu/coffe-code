@@ -23,16 +23,16 @@ router.post('/registro',verificarToken, async (req, res) => {
 router.put('/modificar/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const { nombre, email, telefono, activo } = req.body;
+        const { nombre, email, telefono, activo, codigo_rfid } = req.body;
 
         const query = `
-            UPDATE clientes 
-            SET nombre = $1, email = $2, telefono = $3, activo = $4 
-            WHERE id_cliente = $5 
+            UPDATE clientes
+            SET nombre = $1, email = $2, telefono = $3, activo = $4, codigo_rfid = $5
+            WHERE id_cliente = $6
             RETURNING *
         `;
-        
-        const values = [nombre, email, telefono, activo, id];
+
+        const values = [nombre, email, telefono, activo, codigo_rfid || null, id];
         const result = await db.query(query, values);
         if (result.rowCount === 0) {
             return res.status(404).json({

@@ -124,7 +124,7 @@ const formatTime = (fecha: string) => {
     </div>
 
     <footer class="watermark">
-      Software por CoffeeCode
+      Software CoffeeCode
     </footer>
   </div>
 </template>

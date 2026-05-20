@@ -88,8 +88,7 @@ interface Promocion {
 interface Beneficio {
   id_cliente_beneficio: number
   nombre_beneficio: string
-  tipo: string
-  disponible: number
+  disponible: boolean
 }
 
 interface ClienteConBeneficios {
@@ -1078,6 +1077,8 @@ const finalizePackageAdd = () => {
 }
 
 // ── RFID ────────────────────────────────────────────────
+let rfidSocketData: { uid: string; status?: string; cliente?: { id_cliente: number; nombre: string }; beneficios?: any[] } | null = null
+
 const toggleRfidListening = async () => {
   rfidListening.value = !rfidListening.value
   rfidError.value = ''
@@ -1088,17 +1089,32 @@ const toggleRfidListening = async () => {
     displayToast('Escuchando RFID...', 'warning')
 
     socket = connect()
+    console.log('[RFID] Socket connecting, id:', socket?.id)
+
     socket.off('rfid_detectado')
-    socket.on('rfid_detectado', async (data: { uid: string }) => {
+    socket.on('rfid_detectado', (data: { uid: string; status?: string; cliente?: { id_cliente: number; nombre: string }; beneficios?: any[]; mensaje?: string }) => {
+      console.log('[RFID] Evento recibido:', JSON.stringify(data))
+      rfidSocketData = data
       rfidInput.value = data.uid
       rfidListening.value = false
       playSound('beep')
-      await handleRfidInput()
+      handleRfidInput()
+    })
+
+    socket.on('connect', () => {
+      console.log('[RFID] Socket connected:', socket?.id)
+    })
+
+    socket.on('disconnect', () => {
+      console.log('[RFID] Socket disconnected')
     })
   } else {
     if (socket) {
       socket.off('rfid_detectado')
+      socket.off('connect')
+      socket.off('disconnect')
     }
+    rfidSocketData = null
   }
 }
 
@@ -1110,15 +1126,54 @@ const handleRfidInput = async () => {
   rfidError.value = ''
   playSound('beep')
 
-  displayToast('Buscando cliente...', 'warning')
+  // Si viene data del socket, ya tiene todo - no hacer segundo request
+  if (rfidSocketData) {
+    // Cliente identificado correctamente
+    if (rfidSocketData.cliente) {
+      rfidDetectedClient.value = {
+        id_cliente: rfidSocketData.cliente.id_cliente,
+        nombre: rfidSocketData.cliente.nombre,
+        beneficios: rfidSocketData.beneficios || []
+      }
+      displayToast(`Cliente ${rfidDetectedClient.value.nombre} identificado`, 'success')
+      showClientConfirmModal.value = true
+      rfidSocketData = null
+      rfidInput.value = ''
+      return
+    }
 
+    // Errores del socket
+    if (rfidSocketData.status === 'no_registrado') {
+      rfidError.value = 'Tarjeta no vinculada a ningún cliente'
+      displayToast('Cliente no encontrado', 'error')
+      playSound('error')
+      rfidSocketData = null
+      rfidInput.value = ''
+      return
+    }
+
+    if (rfidSocketData.status === 'inactivo') {
+      rfidError.value = 'El cliente está desactivado en el sistema'
+      displayToast('Cliente desactivado', 'error')
+      playSound('error')
+      rfidSocketData = null
+      rfidInput.value = ''
+      return
+    }
+
+    // Si tiene status pero no cliente ni error, continuar al fallback manual
+    rfidSocketData = null
+  }
+
+  // Solo para entrada manual (tecleado), llamar API
+  displayToast('Buscando cliente...', 'warning')
   const res = await fetchConToken(`/iot/rfid/${code}`)
 
-  if (res.status === 'uso_aplicado') {
+  if (res.status === 'cliente_identificado' || res.status === 'uso_aplicado') {
     rfidDetectedClient.value = {
       id_cliente: res.cliente?.id_cliente || 0,
       nombre: res.cliente?.nombre || 'Cliente',
-      beneficios: []
+      beneficios: res.beneficios || []
     }
     displayToast(`Cliente ${rfidDetectedClient.value.nombre} encontrado`, 'success')
     showClientConfirmModal.value = true
@@ -1126,13 +1181,9 @@ const handleRfidInput = async () => {
     rfidError.value = 'Tarjeta no vinculada a ningún cliente'
     displayToast('Cliente no encontrado', 'error')
     playSound('error')
-  } else if (res.status === 'sin_beneficios') {
-    rfidError.value = 'El cliente no tiene beneficios activos'
-    displayToast('Cliente sin beneficios activos', 'error')
-    playSound('error')
-  } else if (res.status === 'agotado') {
-    rfidError.value = 'El cliente ya no tiene usos disponibles'
-    displayToast('Beneficio agotado', 'error')
+  } else if (res.status === 'inactivo') {
+    rfidError.value = 'El cliente está desactivado en el sistema'
+    displayToast('Cliente desactivado', 'error')
     playSound('error')
   } else {
     rfidError.value = 'Error al buscar cliente'
