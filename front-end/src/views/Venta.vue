@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useSocket } from '../composables/useSocket'
 import API_URL from '../config/api'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const API_BASE = `${API_URL}/api`
+
+const { connect } = useSocket()
+let socket: ReturnType<typeof connect> | null = null
 
 // ── TIPOS ──────────────────────────────────────────────
 interface Categoria {
@@ -131,11 +135,8 @@ const esMenuActivoAhora = (menu: any): boolean => {
   const horaActual = ahora.getHours() * 60 + ahora.getMinutes()
   const diaSemana = ahora.getDay()
 
-  const diasMap: Record<number, string> = {
-    0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles',
-    4: 'jueves', 5: 'viernes', 6: 'sabado'
-  }
-  const diaActual = diasMap[diaSemana]
+  const diasMap = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']
+  const diaActual = diasMap[diaSemana] ?? 'domingo'
 
   console.log(`[DEBUG esMenuActivoAhora] Evaluando: ${menu.nombre_menu || menu.nombre}`)
   console.log(`  Hora actual: ${horaActual} (${Math.floor(horaActual/60)}:${horaActual%60})`)
@@ -176,7 +177,10 @@ const esMenuActivoAhora = (menu: any): boolean => {
     // Quitar acentos para comparación correcta (Miércoles -> miercoles)
     diasStr = diasStr.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     // Dividir por comas
-    const diasMenu = diasStr.split(',').map((d: string) => d.trim()).filter(d => d)
+    const diasArr: string[] = diasStr.split(',')
+    const diasMenu = diasArr
+      .map((d: string) => d.trim())
+      .filter((d: string) => d.length > 0)
     console.log(`  Días menú (parsed): ${diasMenu}`)
     console.log(`  Día actual: ${diaActual}, incluye: ${diasMenu.includes(diaActual)}`)
     if (!diasMenu.includes(diaActual)) {
@@ -210,6 +214,7 @@ const rfidInput = ref('')
 const rfidDetectedClient = ref<ClienteConBeneficios | null>(null)
 const rfidError = ref('')
 const rfidInputRef = ref<HTMLInputElement | null>(null)
+const showClientConfirmModal = ref(false)
 
 // Paquetes
 const paquetes = ref<Paquete[]>([])
@@ -255,6 +260,7 @@ const activeView = ref<'products' | 'paquetes' | 'promos'>('products')
 // Pago
 const paymentMethods = ['efectivo', 'tarjeta', 'transferencia', 'multiple', 'cortesia']
 const selectedPayment = ref('efectivo')
+const tipoOrden = ref<'local' | 'para_llevar' | 'delivery'>('local')
 
 const formatPaymentMethod = (method: string): string => {
   return method.charAt(0).toUpperCase() + method.slice(1)
@@ -565,6 +571,14 @@ watch([cart, selectedClient], () => {
     saveTicket()
   }
 }, { deep: true })
+
+onUnmounted(() => {
+  if (socket) {
+    socket.off('rfid_detectado')
+    socket.disconnect()
+    socket = null
+  }
+})
 
 // ── COMPUTADOS ─────────────────────────────────────────
 const filteredProducts = computed(() => {
@@ -1067,11 +1081,23 @@ const finalizePackageAdd = () => {
 const toggleRfidListening = async () => {
   rfidListening.value = !rfidListening.value
   rfidError.value = ''
-  
+
   if (rfidListening.value) {
     await nextTick()
     rfidInputRef.value?.focus()
     displayToast('Escuchando RFID...', 'warning')
+
+    socket = connect()
+    socket.on('rfid_detectado', async (data: { uid: string }) => {
+      rfidInput.value = data.uid
+      rfidListening.value = false
+      playSound('beep')
+      await handleRfidInput()
+    })
+  } else {
+    if (socket) {
+      socket.off('rfid_detectado')
+    }
   }
 }
 
@@ -1080,28 +1106,40 @@ const handleRfidInput = async () => {
   if (!code || code.length < 4) return
 
   rfidListening.value = false
+  rfidError.value = ''
   playSound('beep')
-  
-  // Endpoint pendiente - por ahora simulating
-  // const res = await fetchConToken(`/clientes/buscar-rfid/${code}`)
-  
+
   displayToast('Buscando cliente...', 'warning')
-  
-  // Simular búsqueda (reemplazar con endpoint real cuando esté disponible)
-  setTimeout(() => {
-    rfidInput.value = ''
-    displayToast('Endpoint RFID pendiente - configure backend', 'warning')
-  }, 1000)
-  
-  // Código cuando endpoint esté disponible:
-  // if (res.status === 'ok' && res.datos?.cliente) {
-  //   rfidDetectedClient.value = res.datos
-  //   showClientConfirmModal = true
-  // } else {
-  //   rfidError.value = 'Cliente no encontrado'
-  //   displayToast('Cliente no encontrado', 'error')
-  //   playSound('error')
-  // }
+
+  const res = await fetchConToken(`/iot/rfid/${code}`)
+
+  if (res.status === 'uso_aplicado') {
+    rfidDetectedClient.value = {
+      id_cliente: res.cliente?.id_cliente || 0,
+      nombre: res.cliente?.nombre || 'Cliente',
+      beneficios: []
+    }
+    displayToast(`Cliente ${rfidDetectedClient.value.nombre} encontrado`, 'success')
+    showClientConfirmModal.value = true
+  } else if (res.status === 'no_registrado') {
+    rfidError.value = 'Tarjeta no vinculada a ningún cliente'
+    displayToast('Cliente no encontrado', 'error')
+    playSound('error')
+  } else if (res.status === 'sin_beneficios') {
+    rfidError.value = 'El cliente no tiene beneficios activos'
+    displayToast('Cliente sin beneficios activos', 'error')
+    playSound('error')
+  } else if (res.status === 'agotado') {
+    rfidError.value = 'El cliente ya no tiene usos disponibles'
+    displayToast('Beneficio agotado', 'error')
+    playSound('error')
+  } else {
+    rfidError.value = 'Error al buscar cliente'
+    displayToast('Error al buscar cliente', 'error')
+    playSound('error')
+  }
+
+  rfidInput.value = ''
 }
 
 // ── CLIENTE ─────────────────────────────────────────────
@@ -1121,6 +1159,19 @@ const applyClientPromotions = () => {
   // Aplicar promociones que tenga el cliente linked
   // Por ahora vacío - cuando endpoint esté disponible
   appliedPromociones.value = []
+}
+
+const confirmRfidClient = () => {
+  if (rfidDetectedClient.value) {
+    selectedClient.value = {
+      id_cliente: rfidDetectedClient.value.id_cliente,
+      nombre: rfidDetectedClient.value.nombre
+    }
+    applyClientPromotions()
+  }
+  showClientConfirmModal.value = false
+  rfidDetectedClient.value = null
+  displayToast(`Cliente ${selectedClient.value?.nombre} aplicado al ticket`, 'success')
 }
 
 // ── MODAL DE PROMOCIÓN ─────────────────────────────────────
@@ -1367,7 +1418,7 @@ const processPay = async () => {
         subtotal: subtotalSinIva.value,
         total: total.value,
         id_cliente: selectedClient.value?.id_cliente || null,
-        tipo_orden: 'local',
+        tipo_orden: tipoOrden.value,
         mesa_numero: null,
         descuento: totalDescuentos.value,
         impuestos: iva.value,
@@ -1529,6 +1580,11 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         <h1 class="venta-title">Terminal POS</h1>
       </div>
       <div class="header-center">
+        <select v-model="tipoOrden" class="tipo-orden-select">
+          <option value="local">🍽️ Local</option>
+          <option value="para_llevar">📦 Para Llevar</option>
+          <option value="delivery">🚴 Delivery</option>
+        </select>
         <button 
           class="rfid-btn" 
           :class="{ active: rfidListening }"
@@ -1942,6 +1998,24 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
       </div>
     </div>
 
+    <!-- MODAL: RFID Client Confirm -->
+    <div v-if="showClientConfirmModal && rfidDetectedClient" class="modal-overlay" @click.self="showClientConfirmModal = false">
+      <div class="modal-content">
+        <h3>Cliente Detectado</h3>
+        <div class="rfid-client-info">
+          <p class="rfid-client-name">{{ rfidDetectedClient.nombre }}</p>
+          <p v-if="rfidDetectedClient.beneficios?.length > 0" class="rfid-client-benefits">
+            {{ rfidDetectedClient.beneficios.length }} beneficio(s) disponible(s)
+          </p>
+          <p v-else class="rfid-client-benefits">Sin beneficios activos</p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn--secondary" @click="showClientConfirmModal = false; rfidDetectedClient = null">Cancelar</button>
+          <button class="btn btn--primary" @click="confirmRfidClient">Aplicar a Ticket</button>
+        </div>
+      </div>
+    </div>
+
     <!-- MODAL: Confirm -->
     <div v-if="showConfirmModal" class="modal-overlay">
       <div class="modal-content confirm-modal">
@@ -1994,6 +2068,10 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .rfid-btn.active { background: #002D72; color: #fff; border-color: #002D72; }
 .rfid-btn svg { width: 18px; height: 18px; }
 .rfid-input { padding: 10px 14px; border: 2px solid #002D72; border-radius: 8px; font-size: 14px; width: 250px; outline: none; }
+.rfid-input:focus { border-color: #002D72; }
+
+.tipo-orden-select { padding: 10px 14px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-weight: 600; color: #374151; cursor: pointer; outline: none; }
+.tipo-orden-select:focus { border-color: #002D72; }
 
 .header-right { display: flex; align-items: center; gap: 12px; }
 .btn-client { display: flex; align-items: center; gap: 6px; padding: 8px 14px; background: #fff; border: 1px solid #2563eb; color: #2563eb; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer; }
@@ -2180,6 +2258,10 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .client-item:hover { background: #e0e7ff; border-color: #002D72; }
 .form-input { width: 100%; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; margin-bottom: 12px; }
 .btn-full { width: 100%; }
+
+.rfid-client-info { text-align: center; padding: 20px 0; }
+.rfid-client-name { font-size: 20px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+.rfid-client-benefits { font-size: 14px; color: #6b7280; }
 
 .confirm-modal { max-width: 360px; }
 .confirm-details { margin: 16px 0; }
