@@ -12,7 +12,9 @@ USBHIDKeyboard Keyboard;
 // --- Configuración WiFi y Servidor ---
 const char* ssid = "Mega-2.4G-63AF";
 const char* password = "m3q7WwJdct";
-const char* serverUrl = "http://192.168.100.39:3000/api"; 
+const char* serverUrl = "http://10.86.232.200:3000/api"; 
+
+ //const char* serverUrl = "http://192.168.100.39:3000/api"; 
 
 // --- Configuración Pines ---
 #define SS_PIN 10     // RFID SDA
