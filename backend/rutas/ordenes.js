@@ -219,7 +219,86 @@ router.get('/cocina', async (req, res) => {
             mensaje: "Error interno al obtener la informacion" 
         });
     }
-}); 
+});
+
+router.put('/estado/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { estado_orden } = req.body;
+
+        if (!estado_orden) {
+            return res.status(400).json({ status: "error", mensaje: "Estado requerido" });
+        }
+
+        const query = `SELECT fn_actualizar_orden($1, $2, NULL, NULL, NULL, NULL, NULL, NULL, NULL) AS resultado`;
+        const result = await db.query(query, [id, estado_orden]);
+        const mensaje = result.rows[0].resultado;
+
+        if (mensaje === 'La orden no existe') {
+            return res.status(404).json({ status: "error", mensaje });
+        }
+
+        res.json({ status: "ok", mensaje });
+    } catch (err) {
+        console.error("Error al actualizar estado:", err.message);
+        res.status(500).json({ status: "error", mensaje: "Error interno" });
+    }
+});
+
+router.get('/modificadores/:idOrden', async (req, res) => {
+    try {
+        const { idOrden } = req.params;
+
+        const query = `
+            SELECT om.id_detalle_modificador, om.id_orden_detalle,
+                   om.id_ingrediente, i.nombre_ingrediente,
+                   om.accion, om.precio_modificador,
+                   om.id_seleccion,
+                   od.id_orden, od.nombre_producto,
+                   od.id_producto
+            FROM orden_detalle_modificadores om
+            JOIN orden_detalles od ON om.id_orden_detalle = od.id_orden_detalle
+            JOIN ingredientes i ON om.id_ingrediente = i.id_ingrediente
+            WHERE od.id_orden = $1
+        `;
+
+        const result = await db.query(query, [idOrden]);
+
+        res.json({
+            status: "ok",
+            datos: result.rows
+        });
+    } catch (err) {
+        console.error("Error al obtener modificadores:", err.message);
+        res.status(500).json({ status: "error", mensaje: "Error interno" });
+    }
+});
+
+router.get('/selecciones-paquete/:idOrden', async (req, res) => {
+    try {
+        const { idOrden } = req.params;
+
+        const query = `
+            SELECT ops.id_seleccion, ops.id_orden_detalle, ops.id_paquete_grupo,
+                   ops.id_producto, p.nombre_producto,
+                   od.id_orden
+            FROM orden_paquete_selecciones ops
+            JOIN orden_detalles od ON ops.id_orden_detalle = od.id_orden_detalle
+            JOIN productos p ON ops.id_producto = p.id_producto
+            WHERE od.id_orden = $1
+        `;
+
+        const result = await db.query(query, [idOrden]);
+
+        res.json({
+            status: "ok",
+            datos: result.rows
+        });
+    } catch (err) {
+        console.error("Error al obtener selecciones:", err.message);
+        res.status(500).json({ status: "error", mensaje: "Error interno" });
+    }
+});
 
 router.get('/pendientes-pago',verificarToken, async (req, res) => {
     try {
@@ -708,6 +787,60 @@ router.delete('/detalles-modificadores/:id', verificarToken, async (req, res) =>
             status: "ok",
             mensaje,
             id_eliminado: id
+        });
+
+    } catch (err) {
+        console.error("Error al eliminar modificador:", err.message);
+        res.status(500).json({
+            status: "error",
+            mensaje: "Error interno al intentar eliminar el modificador"
+        });
+    }
+});
+
+router.delete('/detalles-modificadores/', verificarToken, async (req, res) => {
+    try {
+        const { id_detalle, id_ingrediente, id_seleccion } = req.body;
+
+        if (!id_detalle || !id_ingrediente) {
+            return res.status(400).json({
+                status: "error",
+                mensaje: "id_detalle e id_ingrediente son obligatorios."
+            });
+        }
+
+        let query;
+        let values;
+
+        if (id_seleccion) {
+            query = `
+                DELETE FROM orden_detalle_modificadores
+                WHERE id_orden_detalle = $1 AND id_ingrediente = $2 AND id_seleccion = $3
+                RETURNING id_detalle_modificador
+            `;
+            values = [id_detalle, id_ingrediente, id_seleccion];
+        } else {
+            query = `
+                DELETE FROM orden_detalle_modificadores
+                WHERE id_orden_detalle = $1 AND id_ingrediente = $2 AND id_seleccion IS NULL
+                RETURNING id_detalle_modificador
+            `;
+            values = [id_detalle, id_ingrediente];
+        }
+
+        const result = await db.query(query, values);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                status: "error",
+                mensaje: "No se encontró el modificador para eliminar"
+            });
+        }
+
+        res.json({
+            status: "ok",
+            mensaje: "Modificador eliminado",
+            id_eliminado: result.rows[0].id_detalle_modificador
         });
 
     } catch (err) {

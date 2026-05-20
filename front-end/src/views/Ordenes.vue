@@ -2,36 +2,48 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import API_URL from '../config/api'
-import Sidebar from '../components/Sidebar.vue'
 
 const API_BASE = `${API_URL}/api`
 const authStore = useAuthStore()
 
 // ── TIPOS ──────────────────────────────────────────────
-type OrderStatus = 'pendiente' | 'preparacion' | 'lista' | 'entregada' | 'cancelada'
+interface IngredienteOpcion {
+  id_ingrediente: number
+  nombre_ingrediente: string
+  es_obligatorio: boolean
+  precio_modificador: number
+  seleccionado: boolean
+}
 
-interface OrderItem {
-  name: string
-  qty: number
-  customizations: string[]
-  extras: { name: string; qty: number }[]
+interface OrderDetail {
+  id_orden_detalle: number
+  id_orden: number
+  id_producto: number
+  id_paquete: number | null
+  nombre_producto: string
+  cantidad: number
+  precio_unitario: number
+  subtotal: number
+  modifiers: IngredienteOpcion[]
+  selections: { id_seleccion: number; id_producto: number; nombre_producto: string; id_grupo: number }[]
+  selectionModifiers: Map<number, IngredienteOpcion[]>
 }
 
 interface Order {
-  id: number
   id_orden: number
-  numero_orden: number
-  status: OrderStatus
+  numero_orden: string
   estado_orden: string
-  items: OrderItem[]
-  createdAt: string
+  estado_pago: string
+  fecha_creacion: string
   total: number
+  cliente: string
+  detalles: OrderDetail[]
 }
 
 // ── ESTADO ─────────────────────────────────────────────
 const isLoading = ref(false)
 const error = ref<string | null>(null)
-let pollInterval: number | null = null
+let pollInterval: ReturnType<typeof setInterval> | null = null
 
 // ── FETCH ──────────────────────────────────────────────
 const fetchConToken = async (endpoint: string, method = 'GET', body: any = null) => {
@@ -53,23 +65,6 @@ const fetchConToken = async (endpoint: string, method = 'GET', body: any = null)
   }
 }
 
-// ── MAPEO DE ESTADO ────────────────────────────────────
-const mapEstadoBackend = (estado: string): OrderStatus => {
-  const estadoLower = (estado || '').toLowerCase()
-  const mapa: Record<string, OrderStatus> = {
-    'pendiente': 'pendiente',
-    'en proceso': 'preparacion',
-    'preparacion': 'preparacion',
-    'preparando': 'preparacion',
-    'lista': 'lista',
-    'completada': 'entregada',
-    'entregada': 'entregada',
-    'cancelada': 'cancelada',
-    'cancelado': 'cancelada'
-  }
-  return mapa[estadoLower] || 'pendiente'
-}
-
 // ── CARGA DE DATOS ────────────────────────────────────
 const orders = ref<Order[]>([])
 
@@ -77,76 +72,245 @@ const loadOrders = async () => {
   isLoading.value = true
   error.value = null
 
-  const [ordenesRes, detallesRes] = await Promise.all([
-    fetchConToken('/ordenes/mostrar'),
-    fetchConToken('/ordenes/detalles/mostrar')
-  ])
+  const res = await fetchConToken('/ordenes/mostrar')
 
-  if (ordenesRes.status === 'ok' && ordenesRes.datos) {
-    const detalles = detallesRes.datos || []
-
-    orders.value = ordenesRes.datos.map((o: any) => {
-      const ordenDetalles = detalles.filter((d: any) => d.id_orden === o.id_orden)
-      const items: OrderItem[] = ordenDetalles.map((d: any) => ({
-        name: d.nombre_producto || d.nombre_paquete || 'Producto',
-        qty: d.cantidad || 1,
-        customizations: d.notas ? [d.notas] : [],
-        extras: []
-      }))
-
-      const total = ordenDetalles.reduce((acc: number, d: any) => acc + (d.subtotal || 0), 0)
-
-      return {
-        id: o.id_orden,
-        id_orden: o.id_orden,
-        numero_orden: o.numero_orden || o.id_orden,
-        status: mapEstadoBackend(o.estado_orden),
-        estado_orden: o.estado_orden,
-        items,
-        createdAt: o.fecha_creacion ? new Date(o.fecha_creacion).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '--:--',
-        total: total || o.total || 0
-      }
-    })
+  if (res.status === 'ok' && res.datos) {
+    orders.value = res.datos.map((o: any) => ({
+      id_orden: o.id_orden,
+      numero_orden: o.numero_orden,
+      estado_orden: o.estado_orden,
+      estado_pago: o.estado_pago,
+      fecha_creacion: o.fecha_creacion,
+      total: Number(o.total) || 0,
+      cliente: o.cliente || 'Público general',
+      detalles: []
+    }))
   } else {
-    error.value = ordenesRes.mensaje || 'Error al cargar órdenes'
+    error.value = res.mensaje || 'Error al cargar órdenes'
   }
 
   isLoading.value = false
 }
 
-// ── ACCIONES ────────────────────────────────────────────
-const editOrder = async (id: number) => {
-  const order = orders.value.find(o => o.id === id)
-  if (!order) return
+const loadOrderDetails = async (orderId: number) => {
+  const res = await fetchConToken('/ordenes/detalles/mostrar')
+  if (res.status === 'ok' && res.datos) {
+    return res.datos.filter((d: any) => d.id_orden === orderId)
+  }
+  return []
+}
 
-  const nuevoEstado = order.status === 'pendiente' ? 'preparacion' : order.status === 'preparacion' ? 'lista' : order.status
-  const res = await fetchConToken(`/ordenes/modificar/${id}`, 'PUT', { estado_orden: nuevoEstado })
+const loadOrderModifiers = async (orderId: number) => {
+  const res = await fetchConToken(`/ordenes/modificadores/${orderId}`)
+  if (res.status === 'ok' && res.datos) {
+    return res.datos
+  }
+  return []
+}
 
-  if (res.status === 'ok') {
-    await loadOrders()
-  } else {
-    error.value = res.mensaje || 'Error al actualizar orden'
+const loadAllPackageSelections = async (orderId: number) => {
+  const res = await fetchConToken(`/ordenes/selcciones-paquete/${orderId}`)
+  if (res.status === 'ok' && res.datos) {
+    return res.datos
+  }
+  return []
+}
+
+const loadModifiers = async (productId: number, existingIds: number[] = []) => {
+  const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${productId}`)
+  if (res.status === 'ok' && res.datos) {
+    return res.datos.map((i: any) => ({
+      id_ingrediente: i.id_ingrediente,
+      nombre_ingrediente: i.nombre_ingrediente,
+      es_obligatorio: i.es_obligatorio,
+      precio_modificador: Number(i.precio_modificador || 0),
+      seleccionado: existingIds.includes(i.id_ingrediente)
+    }))
+  }
+  return []
+}
+
+// ── MODAL EDITAR ──────────────────────────────────────
+const showEditModal = ref(false)
+const editingOrder = ref<Order | null>(null)
+const editingDetails = ref<OrderDetail[]>([])
+const editingDetailModifiers = ref<Map<number, IngredienteOpcion[]>>(new Map())
+
+const openEditModal = async (order: Order) => {
+  editingOrder.value = order
+  showEditModal.value = true
+
+  const detalles = await loadOrderDetails(order.id_orden)
+  const allModifiers = await loadOrderModifiers(order.id_orden)
+  const allSelections = await loadAllPackageSelections(order.id_orden)
+
+  editingDetails.value = detalles.map((d: any) => ({
+    id_orden_detalle: d.id_orden_detalle,
+    id_orden: d.id_orden,
+    id_producto: d.id_producto,
+    id_paquete: d.id_paquete,
+    nombre_producto: d.nombre_producto || d.nombre_paquete || 'Producto',
+    cantidad: d.cantidad,
+    precio_unitario: d.precio_unitario,
+    subtotal: d.subtotal,
+    modifiers: [],
+    selections: [],
+    selectionModifiers: new Map()
+  }))
+
+  for (const detail of editingDetails.value) {
+    const detailMods = allModifiers.filter((m: any) => m.id_orden_detalle === detail.id_orden_detalle)
+
+    if (detail.id_producto && !detail.id_paquete) {
+      const productoRes = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${detail.id_producto}`)
+      if (productoRes.status === 'ok' && productoRes.datos) {
+        const existingIds = detailMods.map((m: any) => m.id_ingrediente)
+        const mods = productoRes.datos.map((i: any) => ({
+          id_ingrediente: i.id_ingrediente,
+          nombre_ingrediente: i.nombre_ingrediente,
+          es_obligatorio: i.es_obligatorio,
+          precio_modificador: Number(i.precio_modificador || 0),
+          seleccionado: existingIds.includes(i.id_ingrediente)
+        }))
+        editingDetailModifiers.value.set(detail.id_orden_detalle, mods)
+      }
+    } else if (detail.id_paquete) {
+      const detailSelections = allSelections.filter((s: any) => s.id_orden_detalle === detail.id_orden_detalle)
+      detail.selections = detailSelections.map((s: any) => ({
+        id_seleccion: s.id_seleccion,
+        id_producto: s.id_producto,
+        nombre_producto: s.nombre_producto,
+        id_grupo: s.id_paquete_grupo
+      }))
+
+      for (const sel of detail.selections) {
+        const selMods = allModifiers.filter((m: any) => m.id_seleccion === sel.id_seleccion)
+        const productoRes = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${sel.id_producto}`)
+        if (productoRes.status === 'ok' && productoRes.datos) {
+          const existingIds = selMods.map((m: any) => m.id_ingrediente)
+          const mods = productoRes.datos.map((i: any) => ({
+            id_ingrediente: i.id_ingrediente,
+            nombre_ingrediente: i.nombre_ingrediente,
+            es_obligatorio: i.es_obligatorio,
+            precio_modificador: Number(i.precio_modificador || 0),
+            seleccionado: existingIds.includes(i.id_ingrediente)
+          }))
+          detail.selectionModifiers.set(sel.id_seleccion, mods)
+        }
+      }
+    }
   }
 }
 
-const deleteOrder = async (id: number) => {
-  if (!confirm('¿Estás seguro de cancelar esta orden?')) return
+const closeEditModal = () => {
+  showEditModal.value = false
+  editingOrder.value = null
+  editingDetails.value = []
+  editingDetailModifiers.value = new Map()
+}
 
-  const res = await fetchConToken(`/ordenes/cancelar/${id}`, 'DELETE')
+const saveModifiers = async () => {
+  if (!editingOrder.value) return
+
+  for (const detail of editingDetails.value) {
+    if (detail.id_producto && !detail.id_paquete) {
+      const mods = editingDetailModifiers.value.get(detail.id_orden_detalle) || []
+      const selectedIds = mods.filter(m => m.seleccionado).map(m => m.id_ingrediente)
+
+      const resMods = await loadOrderModifiers(editingOrder.value.id_orden)
+      const existingMods = resMods.filter((m: any) => m.id_orden_detalle === detail.id_orden_detalle)
+      const existingIds = existingMods.map((m: any) => m.id_ingrediente)
+
+      for (const mod of mods) {
+        const isSelected = selectedIds.includes(mod.id_ingrediente)
+        const wasSelected = existingIds.includes(mod.id_ingrediente)
+
+        if (isSelected && !wasSelected) {
+          await fetchConToken('/ordenes/detalles-modificadores/', 'POST', {
+            id_detalle: detail.id_orden_detalle,
+            id_ingrediente: mod.id_ingrediente,
+            accion: 'agregar',
+            precio: mod.precio_modificador
+          })
+        } else if (!isSelected && wasSelected) {
+          await fetchConToken('/ordenes/detalles-modificadores/', 'DELETE', {
+            id_detalle: detail.id_orden_detalle,
+            id_ingrediente: mod.id_ingrediente
+          })
+        }
+      }
+    } else if (detail.id_paquete && detail.selections.length > 0) {
+      for (const sel of detail.selections) {
+        const selMods = detail.selectionModifiers.get(sel.id_seleccion) || []
+        const selectedIds = selMods.filter(m => m.seleccionado).map(m => m.id_ingrediente)
+
+        const resMods = await loadOrderModifiers(editingOrder.value.id_orden)
+        const existingSelMods = resMods.filter((m: any) => m.id_seleccion === sel.id_seleccion)
+        const existingIds = existingSelMods.map((m: any) => m.id_ingrediente)
+
+        for (const mod of selMods) {
+          const isSelected = selectedIds.includes(mod.id_ingrediente)
+          const wasSelected = existingIds.includes(mod.id_ingrediente)
+
+          if (isSelected && !wasSelected) {
+            await fetchConToken('/ordenes/detalles-modificadores/', 'POST', {
+              id_detalle: detail.id_orden_detalle,
+              id_ingrediente: mod.id_ingrediente,
+              accion: 'agregar',
+              precio: mod.precio_modificador,
+              id_seleccion: sel.id_seleccion
+            })
+          } else if (!isSelected && wasSelected) {
+            await fetchConToken('/ordenes/detalles-modificadores/', 'DELETE', {
+              id_detalle: detail.id_orden_detalle,
+              id_ingrediente: mod.id_ingrediente,
+              id_seleccion: sel.id_seleccion
+            })
+          }
+        }
+      }
+    }
+  }
+
+  alert('Modificadores actualizados')
+  closeEditModal()
+  await loadOrders()
+}
+
+// ── CAMBIAR ESTADO ─────────────────────────────────────
+const updateOrderStatus = async (orderId: number, newStatus: string) => {
+  const res = await fetchConToken(`/ordenes/modificar/${orderId}`, 'PUT', { estado_orden: newStatus })
 
   if (res.status === 'ok') {
-    orders.value = orders.value.filter(o => o.id !== id)
+    await loadOrders()
+
+    if (newStatus === 'cancelada') {
+      setTimeout(() => {
+        orders.value = orders.value.filter(o => o.id_orden !== orderId)
+      }, 60000)
+    } else if (newStatus === 'entregada') {
+      setTimeout(() => {
+        orders.value = orders.value.filter(o => o.id_orden !== orderId)
+      }, 10000)
+    }
   } else {
-    error.value = res.mensaje || 'Error al cancelar orden'
+    error.value = res.mensaje || 'Error al actualizar estado'
   }
+}
+
+const markAsLista = (orderId: number) => updateOrderStatus(orderId, 'lista')
+const markAsDelivered = (orderId: number) => updateOrderStatus(orderId, 'entregada')
+const cancelOrder = (orderId: number) => {
+  if (!confirm('¿Cancelar esta orden?')) return
+  updateOrderStatus(orderId, 'cancelada')
 }
 
 // ── POLLING ─────────────────────────────────────────────
 const startPolling = () => {
   stopPolling()
-  pollInterval = window.setInterval(() => {
+  pollInterval = setInterval(() => {
     loadOrders()
-  }, 15000) // 15 segundos
+  }, 15000)
 }
 
 const stopPolling = () => {
@@ -165,36 +329,50 @@ onUnmounted(() => {
   stopPolling()
 })
 
-// ── FILTRO POR STATUS ───────────────────────────────────
-const statusFilters: { label: string; value: OrderStatus | 'todas' }[] = [
-  { label: 'Todas',       value: 'todas'       },
-  { label: 'Pendientes',  value: 'pendiente'   },
-  { label: 'Preparación', value: 'preparacion' },
-  { label: 'Listas',      value: 'lista'       },
-  { label: 'Entregadas',  value: 'entregada'   },
-  { label: 'Canceladas',  value: 'cancelada'   },
+// ── FILTRO ─────────────────────────────────────────────
+const statusFilters: { label: string; value: string }[] = [
+  { label: 'Todas', value: 'todas' },
+  { label: 'Pendientes', value: 'pendiente' },
+  { label: 'Preparación', value: 'en_preparacion' },
+  { label: 'Listas', value: 'lista' },
+  { label: 'Entregadas', value: 'entregada' },
+  { label: 'Canceladas', value: 'cancelada' },
 ]
-const activeFilter = ref<OrderStatus | 'todas'>('todas')
+const activeFilter = ref('todas')
 
-const filteredOrders = computed(() =>
-  activeFilter.value === 'todas'
-    ? orders.value
-    : orders.value.filter(o => o.status === activeFilter.value)
-)
+const filteredOrders = computed(() => {
+  if (activeFilter.value === 'todas') return orders.value
+  return orders.value.filter(o => o.estado_orden === activeFilter.value)
+})
 
-// ── COLORES POR STATUS ──────────────────────────────────
-// Se cambiaron los colores estáticos por variables temáticas
-const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
-  pendiente:   { label: 'Pendiente',   color: 'var(--color-advertencia, #f59e0b)' },
-  preparacion: { label: 'Preparación', color: 'var(--tenant-primario, #3b82f6)' },
-  lista:       { label: 'Lista',       color: 'var(--color-exitoso, #22c55e)' },
-  entregada:   { label: 'Entregada',   color: 'var(--tenant-texto-muted, #6b7280)' },
-  cancelada:   { label: 'Cancelada',   color: 'var(--color-error, #ef4444)' },
+// ── HELPERS ────────────────────────────────────────────
+const statusMeta: Record<string, { label: string; color: string }> = {
+  'pendiente': { label: 'Pendiente', color: '#f59e0b' },
+  'en_preparacion': { label: 'En preparación', color: '#3b82f6' },
+  'lista': { label: 'Lista', color: '#22c55e' },
+  'entregada': { label: 'Entregada', color: '#6b7280' },
+  'cancelada': { label: 'Cancelada', color: '#ef4444' },
+}
+
+const formatTime = (fecha: string) => {
+  if (!fecha) return '--:--'
+  const d = new Date(fecha)
+  return d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+}
+
+const formatPrice = (value: any) => {
+  const num = Number(value) || 0
+  return num.toFixed(2)
+}
+
+const openPublicView = () => {
+  window.open('/vista-publica', '_blank')
 }
 </script>
 
 <template>
   <div class="ordenes-layout">
+    <Sidebar />
     <main class="ordenes-main">
 
       <header class="ordenes-header">
@@ -212,6 +390,14 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
         <div class="header-right">
           <h1 class="page-title">Órdenes</h1>
           <span v-if="isLoading" class="loading-indicator">⟳</span>
+          <button class="btn-public" @click="openPublicView" title="Abrir vista pública">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
+              <polyline points="15 3 21 3 21 9"/>
+              <line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+            Vista pública
+          </button>
         </div>
       </header>
 
@@ -230,62 +416,86 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
 
         <div
           v-for="order in filteredOrders"
-          :key="order.id"
+          :key="order.id_orden"
           class="order-card"
-          :style="{ '--status-color': statusMeta[order.status].color }"
+          :class="order.estado_orden"
         >
           <div class="order-header">
-            <span class="order-number">Orden: {{ order.numero_orden }}</span>
-            <span class="order-time">{{ order.createdAt }}</span>
+            <div class="order-info">
+              <span class="order-number">{{ order.numero_orden }}</span>
+              <span class="order-client">{{ order.cliente }}</span>
+            </div>
+            <span class="order-time">{{ formatTime(order.fecha_creacion) }}</span>
           </div>
 
-          <div class="status-badge">
-            <span
-              class="status-dot"
-              :style="{ background: statusMeta[order.status].color }"
-            ></span>
-            <span
-              class="status-label"
-              :style="{ color: statusMeta[order.status].color }"
-            >
-              {{ statusMeta[order.status].label }}
-            </span>
+          <div class="status-badge" :style="{ color: statusMeta[order.estado_orden]?.color || '#6b7280' }">
+            <span class="status-dot" :style="{ background: statusMeta[order.estado_orden]?.color || '#6b7280' }"></span>
+            {{ statusMeta[order.estado_orden]?.label || order.estado_orden }}
           </div>
 
           <div class="order-items">
-            <div v-for="(item, i) in order.items" :key="i" class="order-item">
-              <div class="order-item-header">
-                <span class="order-item-name">{{ item.name }}</span>
-                <span class="order-item-qty">× {{ item.qty }}</span>
-              </div>
-              <div v-if="item.customizations.length" class="order-customizations">
-                <span v-for="c in item.customizations" :key="c" class="custom-tag">{{ c }}</span>
-              </div>
-              <div v-for="extra in item.extras" :key="extra.name" class="order-extra">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                {{ extra.name }}
-                <span class="extra-qty">× {{ extra.qty }}</span>
-              </div>
+            <div v-for="detail in order.detalles" :key="detail.id_orden_detalle" class="order-item">
+              <span class="item-qty">×{{ detail.cantidad }}</span>
+              <span class="item-name">{{ detail.nombre_producto }}</span>
+              <span class="item-price">${{ formatPrice(detail.subtotal) }}</span>
             </div>
           </div>
 
-          <div class="order-footer">
-            <span class="order-total">${{ order.total }}</span>
-            <div class="order-actions">
-              <button class="card-btn card-btn--edit" @click="editOrder(order.id)" title="Editar orden">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </button>
-              <button class="card-btn card-btn--delete" @click="deleteOrder(order.id)" title="Cancelar orden">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <polyline points="3,6 5,6 21,6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                  <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="currentColor" stroke-width="1.5"/>
-                </svg>
-              </button>
-            </div>
+          <div class="order-total-row">
+            <span>Total</span>
+            <span class="order-total-value">${{ formatPrice(order.total) }}</span>
+          </div>
+
+          <div class="order-actions">
+            <button
+              v-if="order.estado_orden === 'pendiente' || order.estado_orden === 'en_preparacion'"
+              class="action-btn action-btn--lista"
+              @click="markAsLista(order.id_orden)"
+              title="Marcar como lista"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              Lista
+            </button>
+
+            <button
+              v-if="order.estado_orden === 'lista'"
+              class="action-btn action-btn--deliver"
+              @click="markAsDelivered(order.id_orden)"
+              title="Marcar como entregada"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+              </svg>
+              Entregar
+            </button>
+
+            <button
+              v-if="order.estado_orden !== 'cancelada' && order.estado_orden !== 'entregada'"
+              class="action-btn action-btn--edit"
+              @click="openEditModal(order)"
+              title="Editar modificadores"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+
+            <button
+              v-if="order.estado_orden !== 'cancelada' && order.estado_orden !== 'entregada'"
+              class="action-btn action-btn--cancel"
+              @click="cancelOrder(order.id_orden)"
+              title="Cancelar orden"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="15" y1="9" x2="9" y2="15"/>
+                <line x1="9" y1="9" x2="15" y2="15"/>
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -295,11 +505,76 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
         <strong class="watermark-brand">CoffeeCode</strong>
       </div>
     </main>
+
+    <!-- MODAL EDITAR MODIFICADORES -->
+    <div v-if="showEditModal && editingOrder" class="modal-overlay" @click.self="closeEditModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Editar: {{ editingOrder.numero_orden }}</h3>
+          <button class="close-btn" @click="closeEditModal">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <div v-for="detail in editingDetails" :key="detail.id_orden_detalle" class="detail-section">
+            <div class="detail-header">
+              <span class="detail-name">{{ detail.nombre_producto }}</span>
+              <span class="detail-qty">×{{ detail.cantidad }}</span>
+            </div>
+
+            <div v-if="!detail.id_paquete" class="modifiers-list">
+              <label
+                v-for="mod in (editingDetailModifiers.get(detail.id_orden_detalle) || [])"
+                :key="mod.id_ingrediente"
+                class="modifier-row"
+              >
+                <input type="checkbox" v-model="mod.seleccionado" :disabled="mod.es_obligatorio" />
+                <span class="mod-name">{{ mod.nombre_ingrediente }}</span>
+                <span v-if="mod.precio_modificador > 0" class="mod-price">+${{ mod.precio_modificador }}</span>
+                <span v-if="mod.es_obligatorio" class="mod-required">Requerido</span>
+              </label>
+              <p v-if="(editingDetailModifiers.get(detail.id_orden_detalle) || []).length === 0" class="no-mods">
+                Sin modificadores
+              </p>
+            </div>
+
+            <div v-else-if="detail.selections.length > 0" class="package-selections">
+              <div v-for="sel in detail.selections" :key="sel.id_seleccion" class="selection-group">
+                <div class="selection-header">
+                  {{ sel.nombre_producto }}
+                </div>
+                <div class="modifiers-list">
+                  <label
+                    v-for="mod in (detail.selectionModifiers.get(sel.id_seleccion) || [])"
+                    :key="mod.id_ingrediente"
+                    class="modifier-row"
+                  >
+                    <input type="checkbox" v-model="mod.seleccionado" :disabled="mod.es_obligatorio" />
+                    <span class="mod-name">{{ mod.nombre_ingrediente }}</span>
+                    <span v-if="mod.precio_modificador > 0" class="mod-price">+${{ mod.precio_modificador }}</span>
+                    <span v-if="mod.es_obligatorio" class="mod-required">Requerido</span>
+                  </label>
+                  <p v-if="(detail.selectionModifiers.get(sel.id_seleccion) || []).length === 0" class="no-mods">
+                    Sin modificadores
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div v-else class="package-note">
+              Paquete sin selections
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn btn--secondary" @click="closeEditModal">Cancelar</button>
+          <button class="btn btn--primary" @click="saveModifiers">Guardar cambios</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* ── LAYOUT ── */
 .ordenes-layout {
   display: flex;
   min-height: 100vh;
@@ -310,23 +585,22 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: var(--espacio-5, 20px) var(--espacio-6, 24px);
-  gap: var(--espacio-4, 16px);
+  padding: 20px 24px;
+  gap: 16px;
   overflow: hidden;
   position: relative;
 }
 
-/* ── HEADER ── */
 .ordenes-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--espacio-4, 16px);
+  gap: 16px;
 }
 
 .filter-bar {
   display: flex;
-  gap: var(--espacio-2, 8px);
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -335,13 +609,11 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
   border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   color: var(--tenant-texto-muted, #78716c);
   border-radius: 50px;
-  padding: var(--espacio-1, 4px) var(--espacio-4, 16px);
-  font-size: var(--font-size-sm, 13px);
-  font-weight: var(--font-weight-medium, 500);
+  padding: 4px 16px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-  font-family: var(--tenant-fuente, sans-serif);
-  white-space: nowrap;
+  transition: all 0.15s;
 }
 
 .filter-chip:hover {
@@ -358,15 +630,14 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
 .header-right {
   display: flex;
   align-items: center;
-  gap: var(--espacio-2, 8px);
+  gap: 12px;
 }
 
 .page-title {
   margin: 0;
-  font-size: var(--font-size-2xl, 30px);
-  font-weight: var(--font-weight-bold, 600);
+  font-size: 30px;
+  font-weight: 600;
   color: var(--tenant-texto);
-  white-space: nowrap;
 }
 
 .loading-indicator {
@@ -379,16 +650,35 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
   to { transform: rotate(360deg); }
 }
 
+.btn-public {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--tenant-primario);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-public svg {
+  width: 16px;
+  height: 16px;
+}
+
 .error-banner {
   background: color-mix(in srgb, var(--color-error, #ef4444) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 30%, transparent);
   color: var(--color-error, #ef4444);
-  padding: var(--espacio-3, 12px);
+  padding: 12px;
   border-radius: 8px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: var(--espacio-3, 12px);
+  gap: 12px;
 }
 
 .error-banner button {
@@ -398,16 +688,15 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
   padding: 4px 12px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: var(--font-size-sm, 13px);
+  font-size: 13px;
 }
 
-/* ── GRID ── */
 .orders-grid {
   flex: 1;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  grid-auto-rows: minmax(180px, auto);
-  gap: var(--espacio-4, 16px);
+  grid-auto-rows: minmax(200px, auto);
+  gap: 16px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--tenant-texto) 10%, transparent) transparent;
@@ -415,24 +704,18 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
   min-height: 0;
 }
 
-/* ── TARJETA ── */
 .order-card {
   background: color-mix(in srgb, var(--tenant-fondo) 95%, black 5%);
   border: 1.5px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
   border-radius: 16px;
-  padding: var(--espacio-4, 16px);
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: var(--espacio-3, 12px);
+  gap: 12px;
   transition: border-color 0.15s;
   position: relative;
 }
 
-.order-card:hover {
-  border-color: color-mix(in srgb, var(--tenant-texto) 20%, transparent);
-}
-
-/* Línea de color izquierda según status */
 .order-card::before {
   content: '';
   position: absolute;
@@ -440,62 +723,72 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
   top: 15%;
   bottom: 15%;
   width: 3px;
-  background: var(--status-color);
   border-radius: 0 2px 2px 0;
-  opacity: 0.7;
 }
 
-/* Cabecera */
+.order-card.pendiente::before { background: #f59e0b; }
+.order-card.en_preparacion::before { background: #3b82f6; }
+.order-card.lista::before { background: #22c55e; }
+.order-card.entregada::before { background: #6b7280; }
+.order-card.cancelada::before { background: #ef4444; }
+
 .order-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   border-bottom: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
-  padding-bottom: var(--espacio-2, 8px);
+  padding-bottom: 8px;
+  gap: 8px;
+}
+
+.order-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .order-number {
-  font-size: var(--font-size-md, 17px);
-  font-weight: var(--font-weight-bold, 600);
+  font-size: 17px;
+  font-weight: 600;
   color: var(--tenant-texto);
 }
 
+.order-client {
+  font-size: 12px;
+  color: var(--tenant-texto-muted);
+}
+
 .order-time {
-  font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  font-size: 11px;
+  color: var(--tenant-texto-muted);
   background: color-mix(in srgb, var(--tenant-texto) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--tenant-texto) 15%, transparent);
   border-radius: 20px;
   padding: 2px 8px;
+  white-space: nowrap;
 }
 
-/* Badge status */
 .status-badge {
   display: flex;
   align-items: center;
-  gap: var(--espacio-2, 8px);
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  flex-shrink: 0;
 }
 
-.status-label {
-  font-size: var(--font-size-xs, 11px);
-  font-weight: var(--font-weight-medium, 500);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-/* Items */
 .order-items {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--espacio-2, 8px);
+  gap: 6px;
   overflow-y: auto;
   scrollbar-width: none;
 }
@@ -504,130 +797,113 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
 
 .order-item {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.order-item-header {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  font-size: 14px;
 }
 
-.order-item-name {
-  font-size: var(--font-size-base, 15px);
-  font-weight: var(--font-weight-bold, 600);
+.item-qty {
+  color: var(--tenant-primario);
+  font-weight: 600;
+  min-width: 28px;
+}
+
+.item-name {
+  flex: 1;
   color: var(--tenant-texto);
 }
 
-.order-item-qty {
-  font-size: var(--font-size-sm, 13px);
-  font-weight: var(--font-weight-medium, 500);
-  color: var(--tenant-primario);
+.item-price {
+  color: var(--tenant-texto-muted);
+  font-size: 13px;
 }
 
-.order-customizations {
+.order-total-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.custom-tag {
-  font-size: var(--font-size-xs, 11px);
-  color: var(--color-advertencia, #d9a106);
-  background: color-mix(in srgb, var(--color-advertencia, #d9a106) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-advertencia, #d9a106) 15%, transparent);
-  border-radius: 4px;
-  padding: 1px 6px;
-}
-
-.order-extra {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
-  padding-left: var(--espacio-2, 8px);
-}
-
-.order-extra svg {
-  width: 10px;
-  height: 10px;
-  flex-shrink: 0;
-}
-
-.extra-qty {
-  color: var(--tenant-primario);
-}
-
-/* Footer */
-.order-footer {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
   border-top: 1px solid color-mix(in srgb, var(--tenant-texto) 8%, transparent);
-  padding-top: var(--espacio-2, 8px);
+  padding-top: 8px;
+  font-size: 14px;
+  color: var(--tenant-texto-muted);
 }
 
-.order-total {
-  font-size: var(--font-size-base, 15px);
-  font-weight: var(--font-weight-bold, 600);
+.order-total-value {
+  font-size: 16px;
+  font-weight: 700;
   color: var(--tenant-texto);
 }
 
 .order-actions {
   display: flex;
-  gap: var(--espacio-2, 8px);
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-.card-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
-  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
-  cursor: pointer;
+.action-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  gap: 4px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-.card-btn svg {
+.action-btn svg {
   width: 14px;
   height: 14px;
 }
 
-.card-btn--edit {
-  color: var(--tenant-texto-muted, #78716c);
+.action-btn--lista {
+  background: #22c55e;
+  color: #fff;
 }
 
-.card-btn--edit:hover {
-  background: color-mix(in srgb, var(--tenant-primario) 10%, transparent);
-  border-color: color-mix(in srgb, var(--tenant-primario) 25%, transparent);
+.action-btn--lista:hover {
+  background: #16a34a;
+}
+
+.action-btn--deliver {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.action-btn--deliver:hover {
+  background: #2563eb;
+}
+
+.action-btn--edit {
+  background: color-mix(in srgb, var(--tenant-primario) 15%, transparent);
   color: var(--tenant-primario);
+  border: 1px solid color-mix(in srgb, var(--tenant-primario) 30%, transparent);
 }
 
-.card-btn--delete {
-  color: var(--tenant-texto-muted, #78716c);
+.action-btn--edit:hover {
+  background: color-mix(in srgb, var(--tenant-primario) 25%, transparent);
 }
 
-.card-btn--delete:hover {
-  background: color-mix(in srgb, var(--color-error, #dc2626) 10%, transparent);
-  border-color: color-mix(in srgb, var(--color-error, #dc2626) 25%, transparent);
-  color: var(--color-error, #dc2626);
+.action-btn--cancel {
+  background: color-mix(in srgb, #ef4444 15%, transparent);
+  color: #ef4444;
+  border: 1px solid color-mix(in srgb, #ef4444 30%, transparent);
 }
 
-/* ── VACÍO ── */
+.action-btn--cancel:hover {
+  background: color-mix(in srgb, #ef4444 25%, transparent);
+}
+
 .orders-empty {
   grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--espacio-4, 16px);
-  padding: var(--espacio-12, 48px) 0;
+  gap: 16px;
+  padding: 48px 0;
   color: color-mix(in srgb, var(--tenant-texto) 20%, transparent);
 }
 
@@ -636,16 +912,10 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
   height: 48px;
 }
 
-.orders-empty p {
-  margin: 0;
-  font-size: var(--font-size-base, 15px);
-}
-
-/* ── WATERMARK ── */
 .watermark {
   position: absolute;
-  bottom: var(--espacio-5, 20px);
-  right: var(--espacio-6, 24px);
+  bottom: 20px;
+  right: 24px;
   text-align: right;
   display: flex;
   flex-direction: column;
@@ -654,16 +924,207 @@ const statusMeta: Record<OrderStatus, { label: string; color: string }> = {
 }
 
 .watermark-label {
-  font-size: var(--font-size-xs, 11px);
-  color: var(--tenant-texto-muted, #78716c);
+  font-size: 11px;
+  color: var(--tenant-texto-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 .watermark-brand {
-  font-size: var(--font-size-md, 17px);
-  font-weight: var(--font-weight-bold, 600);
+  font-size: 17px;
+  font-weight: 600;
   color: var(--tenant-primario);
-  letter-spacing: -0.02em;
+}
+
+/* ── MODAL ── */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #fff;
+  padding: 20px;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 480px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #111827;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #6b7280;
+  padding: 4px 8px;
+}
+
+.close-btn:hover {
+  color: #ef4444;
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.detail-section {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.detail-name {
+  font-weight: 600;
+  color: #111827;
+}
+
+.detail-qty {
+  color: var(--tenant-primario);
+  font-weight: 600;
+}
+
+.modifiers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modifier-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.modifier-row:hover {
+  border-color: var(--tenant-primario);
+}
+
+.mod-name {
+  flex: 1;
+  font-size: 14px;
+  color: #111827;
+}
+
+.mod-price {
+  font-size: 13px;
+  color: #16a34a;
+  font-weight: 500;
+}
+
+.mod-required {
+  font-size: 10px;
+  background: #fee2e2;
+  color: #dc2626;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn--secondary {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.btn--primary {
+  background: var(--tenant-primario);
+  color: #fff;
+}
+
+.package-note {
+  font-size: 13px;
+  color: var(--tenant-texto-muted);
+  padding: 8px 0;
+  font-style: italic;
+}
+
+.no-mods {
+  font-size: 13px;
+  color: var(--tenant-texto-muted);
+  padding: 8px;
+  margin: 0;
+}
+
+.package-selections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.selection-group {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.selection-header {
+  font-weight: 600;
+  font-size: 13px;
+  color: #374151;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed #e5e7eb;
 }
 </style>

@@ -22,6 +22,11 @@ const router = createRouter({
     },
     {
       path: '/menu-publico',
+      name: 'menu-publico',
+      component: () => import('../views/VistaPublica.vue'),
+    },
+    {
+      path: '/vista-publica',
       name: 'vista-publica',
       component: () => import('../views/VistaPublica.vue'),
     },
@@ -117,7 +122,7 @@ const ROL_MAP: Record<string, string> = {
 }
 
 // ── RUTAS PÚBLICAS (sin validación de token) ───────────────────────────────
-const RUTAS_PUBLICAS = ['login', 'vista-publica']
+const RUTAS_PUBLICAS = ['login', 'vista-publica', 'menu-publico']
 
 // ── VERIFICACIÓN DE TOKEN CON BACKEND ───────────────────────────────────────
 let tokenValidationPromise: Promise<boolean> | null = null

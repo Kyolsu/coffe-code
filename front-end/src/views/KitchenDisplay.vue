@@ -15,6 +15,8 @@ interface OrderItem {
   qty: number
   customizations: string[]
   extras: { name: string; qty: number }[]
+  modifiers: string[]
+  selections?: { name: string; modifiers: string[] }[]
 }
 
 interface Order {
@@ -76,13 +78,17 @@ const loadOrders = async () => {
   isLoading.value = true
   error.value = null
 
-  const [ordenesRes, detallesRes] = await Promise.all([
+  const [ordenesRes, detallesRes, modificadoresRes, seleccionesRes] = await Promise.all([
     fetchConToken('/ordenes/cocina'),
-    fetchConToken('/ordenes/detalles/mostrar')
+    fetchConToken('/ordenes/detalles/mostrar'),
+    fetchConToken('/ordenes/detalles-modificadores/mostrar'),
+    fetchConToken('/ordenes/selcciones-paquete')
   ])
 
   if (ordenesRes.status === 'ok' && ordenesRes.datos) {
     const detalles = detallesRes.datos || []
+    const modificadores = modificadoresRes.datos || []
+    const selecciones = seleccionesRes.datos || []
 
     orders.value = ordenesRes.datos
       .filter((o: any) => {
@@ -91,18 +97,39 @@ const loadOrders = async () => {
       })
       .map((o: any) => {
         let ordenDetalles = detalles.filter((d: any) => d.id_orden === o.id_orden)
-        
-        // Filtrar por zona si hay una seleccionada
+
         if (selectedZona.value !== null) {
           ordenDetalles = ordenDetalles.filter((d: any) => d.id_zona === selectedZona.value)
         }
-        
-        const items: OrderItem[] = ordenDetalles.map((d: any) => ({
-          name: d.nombre_producto || d.nombre_paquete || 'Producto',
-          qty: d.cantidad || 1,
-          customizations: d.notas ? [d.notas] : [],
-          extras: []
-        }))
+
+        const items: OrderItem[] = ordenDetalles.map((d: any) => {
+          const detailMods = modificadores.filter((m: any) => m.id_orden_detalle === d.id_orden_detalle)
+
+          const itemMods = detailMods.map((m: any) => m.nombre_ingrediente)
+
+          const itemSelections = d.id_paquete
+            ? selecciones
+                .filter((s: any) => s.id_orden_detalle === d.id_orden_detalle)
+                .map((s: any) => {
+                  const selMods = modificadores
+                    .filter((m: any) => m.id_seleccion === s.id_seleccion)
+                    .map((m: any) => m.nombre_ingrediente)
+                  return {
+                    name: s.nombre_producto || 'Opción',
+                    modifiers: selMods
+                  }
+                })
+            : undefined
+
+          return {
+            name: d.nombre_producto || d.nombre_paquete || 'Producto',
+            qty: d.cantidad || 1,
+            customizations: d.notas ? [d.notas] : [],
+            extras: [],
+            modifiers: itemMods,
+            selections: itemSelections
+          }
+        })
 
         return {
           id: o.id_orden,
@@ -113,7 +140,7 @@ const loadOrders = async () => {
           createdAt: o.fecha_creacion ? new Date(o.fecha_creacion).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '--:--'
         }
       })
-      .filter((o: Order) => o.items.length > 0) // Solo mostrar órdenes que tienen items en la zona seleccionada
+      .filter((o: Order) => o.items.length > 0)
   } else {
     error.value = ordenesRes.mensaje || 'Error al cargar órdenes de cocina'
   }
@@ -267,6 +294,17 @@ const handleLogout = () => {
               </div>
               <div v-if="item.customizations.length" class="order-customizations">
                 <span v-for="c in item.customizations" :key="c" class="custom-tag">{{ c }}</span>
+              </div>
+              <div v-if="item.selections && item.selections.length" class="order-selections">
+                <div v-for="sel in item.selections" :key="sel.name" class="selection-item">
+                  <span class="selection-name">{{ sel.name }}</span>
+                  <div v-if="sel.modifiers.length" class="order-modifiers">
+                    <span v-for="m in sel.modifiers" :key="m" class="modifier-tag">{{ m }}</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else-if="item.modifiers.length" class="order-modifiers">
+                <span v-for="m in item.modifiers" :key="m" class="modifier-tag">{{ m }}</span>
               </div>
               <div v-for="extra in item.extras" :key="extra.name" class="order-extra">
                 <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -601,6 +639,43 @@ kbd {
   color: var(--color-advertencia, #d97706);
   background: color-mix(in srgb, var(--color-advertencia, #d97706) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-advertencia, #d97706) 20%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.order-selections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espacio-1, 4px);
+  padding-left: var(--espacio-3, 12px);
+  margin-top: 2px;
+}
+
+.selection-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.selection-name {
+  font-size: var(--font-size-xs, 12px);
+  font-weight: 600;
+  color: var(--tenant-texto);
+}
+
+.order-modifiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--espacio-1, 4px);
+  padding-left: var(--espacio-2, 8px);
+  margin-top: 2px;
+}
+
+.modifier-tag {
+  font-size: var(--font-size-xs, 11px);
+  color: var(--tenant-primario);
+  background: color-mix(in srgb, var(--tenant-primario) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-primario) 20%, transparent);
   border-radius: 4px;
   padding: 1px 6px;
 }

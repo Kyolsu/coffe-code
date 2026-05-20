@@ -130,33 +130,61 @@ const esMenuActivoAhora = (menu: any): boolean => {
   const ahora = new Date()
   const horaActual = ahora.getHours() * 60 + ahora.getMinutes()
   const diaSemana = ahora.getDay()
-  
+
   const diasMap: Record<number, string> = {
-    0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles', 
+    0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles',
     4: 'jueves', 5: 'viernes', 6: 'sabado'
   }
   const diaActual = diasMap[diaSemana]
-  
+
+  console.log(`[DEBUG esMenuActivoAhora] Evaluando: ${menu.nombre_menu || menu.nombre}`)
+  console.log(`  Hora actual: ${horaActual} (${Math.floor(horaActual/60)}:${horaActual%60})`)
+  console.log(`  Día actual: ${diaActual}`)
+  console.log(`  Hora inicio: ${menu.hora_inicio}, Hora fin: ${menu.hora_fin}`)
+  console.log(`  Días: ${menu.dias_semana}`)
+
   // Verificar horario
   if (menu.hora_inicio && menu.hora_fin) {
     const horaInicio = menu.hora_inicio.toString().split(':')
     const horaFin = menu.hora_fin.toString().split(':')
     const minutosInicio = parseInt(horaInicio[0]) * 60 + parseInt(horaInicio[1] || '0')
     const minutosFin = parseInt(horaFin[0]) * 60 + parseInt(horaFin[1] || '0')
-    
-    if (horaActual < minutosInicio || horaActual >= minutosFin) {
+
+    console.log(`  Minutos inicio: ${minutosInicio}, Minutos fin: ${minutosFin}`)
+
+    let dentroHorario = false
+    if (minutosFin < minutosInicio) {
+      // Menú cruza medianoche (ej: 00:01 a 10:00)
+      dentroHorario = horaActual >= minutosInicio || horaActual < minutosFin
+    } else {
+      // Menú normal (ej: 13:00 a 16:00)
+      dentroHorario = horaActual >= minutosInicio && horaActual < minutosFin
+    }
+
+    console.log(`  Dentro horario: ${dentroHorario}`)
+
+    if (!dentroHorario) {
       return false
     }
   }
-  
+
   // Verificar días de la semana
   if (menu.dias_semana) {
-    const diasMenu = menu.dias_semana.toLowerCase().split(',').map((d: string) => d.trim())
+    let diasStr = menu.dias_semana.toLowerCase()
+    // Reemplazar guiones por comas (Lunes-Viernes -> Lunes,Viernes)
+    diasStr = diasStr.replace(/-/g, ',')
+    // Quitar acentos para comparación correcta (Miércoles -> miercoles)
+    diasStr = diasStr.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    // Dividir por comas
+    const diasMenu = diasStr.split(',').map((d: string) => d.trim()).filter(d => d)
+    console.log(`  Días menú (parsed): ${diasMenu}`)
+    console.log(`  Día actual: ${diaActual}, incluye: ${diasMenu.includes(diaActual)}`)
     if (!diasMenu.includes(diaActual)) {
       return false
     }
   }
-  
+
+  console.log(`  RESULTADO: ACTIVO`)
   return true
 }
 
@@ -715,33 +743,19 @@ const subtotalSinIva = computed(() => subtotalConIva.value / 1.16)
 
 const totalDescuentos = computed(() => {
   let totalDesc = 0
-  
+
   for (const promo of appliedPromociones.value) {
-    if (promo.tipo === 'porcentaje') {
-      // Porcentaje sobre el subtotal sin IVA
-      totalDesc += subtotalSinIva.value * (promo.valor / 100)
-    } else if (promo.tipo === 'monto') {
-      // Monto fijo
+    if (promo.tipo === 'monto') {
       totalDesc += promo.valor
-    } else if (promo.tipo === 'bogo') {
-      // 2x1: descuento del producto más barato que sea bebida (sin IVA)
-      const itemsSinPaquete = cart.value.filter(i => !i.isPackage)
-      const bebidas = itemsSinPaquete.filter(i => i.categoria?.toLowerCase().includes('bebidas'))
-      const totalBebidas = bebidas.reduce((acc, item) => acc + item.qty, 0)
-      if (totalBebidas >= 2) {
-        const precios = bebidas.map(i => i.unitTotal / 1.16)
-        const masBarato = Math.min(...precios)
-        totalDesc += masBarato
-      }
     }
   }
-  
+
   return totalDesc
 })
 
 const taxBase = computed(() => subtotalSinIva.value - totalDescuentos.value)
 const iva = computed(() => taxBase.value * 0.16)
-const total = computed(() => subtotalConIva.value - totalDescuentos.value)
+const total = computed(() => (subtotalSinIva.value - totalDescuentos.value) * 1.16)
 
 // ── PRODUCTOS E INGREDIENTES ────────────────────────────
 const handleProductClick = async (product: Producto) => {
@@ -1158,6 +1172,7 @@ const openPromoProductOptions = async (product: Producto) => {
   } else {
     promoItemsWithModifiers.value.push({ product, modifiers: [] })
     displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/2`, 'success')
+    showPromoModal.value = true
   }
   isLoadingOptions.value = false
 }
@@ -1219,7 +1234,7 @@ const confirmPromoSelection = () => {
         qty: 1,
         basePrice: item1.product.precio_base,
         modifiers: item1.modifiers,
-        unitTotal: minPrice,
+        unitTotal: 0,
         categoria: item1.product.categoria,
         promoGroupId: promoGroupId,
         promoGroupName: promoGroupName,
@@ -1343,7 +1358,7 @@ const processPay = async () => {
   isProcessingPayment.value = true
   
   try {
-    const numeroOrden = `ORD-${Date.now()}`
+    const numeroOrden = `ORD-${String(Date.now() % 10000).padStart(4, '0')}`
     
     const ordenRes = await fetchConToken('/ordenes/agregar', {
       method: 'POST',
@@ -1369,18 +1384,21 @@ const processPay = async () => {
 
     for (const item of cart.value) {
       console.log('📤 [DEBUG] Agregando detalle:', { item: item.name, qty: item.qty, price: item.unitTotal })
-      
+
+      let precioSinIva = Math.round((item.unitTotal / 1.16) * 100) / 100
+      if (precioSinIva === 0) precioSinIva = 0.01
+
       const detalleRes = await fetchConToken('/ordenes/detalles/agregar', {
         method: 'POST',
         body: JSON.stringify({
           id_orden: idOrden,
           cantidad: item.qty,
-          precio_unitario: item.unitTotal / 1.16,
-          subtotal: item.qty * (item.unitTotal / 1.16),
+          precio_unitario: precioSinIva,
+          subtotal: Math.round(item.qty * precioSinIva * 100) / 100,
           id_producto: item.isPackage ? null : item.productId,
           id_paquete: item.isPackage ? item.packageId : null,
           descuento: 0,
-          id_promocion: item.promoGroupId ? item.promoGroupId : null,
+          id_promocion: null,
           id_zona: null,
           notas: itemNotes.value[item.cartId] || null
         })
@@ -1753,7 +1771,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         </div>
 
         <div class="cart-totals">
-          <div class="totals-row"><span>Subtotal (inc. IVA)</span><span>${{ subtotalConIva.toFixed(2) }}</span></div>
+          <div class="totals-row"><span>Subtotal</span><span>${{ subtotalSinIva.toFixed(2) }}</span></div>
           <div v-if="totalDescuentos > 0" class="totals-row discount">
             <span>Descuentos</span><span>-${{ totalDescuentos.toFixed(2) }}</span>
           </div>
@@ -1932,7 +1950,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           <div class="confirm-row"><span>Cliente:</span><span>{{ selectedClient?.nombre || 'Público General' }}</span></div>
           <div class="confirm-row"><span>Método:</span><span>{{ formatPaymentMethod(selectedPayment) }}</span></div>
           <hr />
-          <div class="confirm-row"><span>Subtotal (inc. IVA):</span><span>${{ subtotalConIva.toFixed(2) }}</span></div>
+          <div class="confirm-row"><span>Subtotal:</span><span>${{ subtotalSinIva.toFixed(2) }}</span></div>
           <div v-if="totalDescuentos > 0" class="confirm-row discount"><span>Descuentos:</span><span>-${{ totalDescuentos.toFixed(2) }}</span></div>
           <div class="confirm-row"><span>IVA:</span><span>${{ iva.toFixed(2) }}</span></div>
           <hr />
