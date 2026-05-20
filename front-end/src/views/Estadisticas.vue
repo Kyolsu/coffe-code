@@ -9,6 +9,7 @@ const authStore = useAuthStore()
 // ── TIPOS ─────────────────────────────
 interface Venta {
   id_orden: number
+  numero_orden: string
   total: number
   fecha: string
   estado_orden: string
@@ -66,6 +67,12 @@ const filtro = ref<'dia' | 'semana' | 'mes'>('semana')
 const filtroCliente = ref<string>('todos')
 
 // ── CARGA DE DATOS ─────────────────────
+const parseFechaLocal = (fechaISO: string | null | undefined): string => {
+  if (!fechaISO) return new Date().toISOString().split('T')[0]
+  const d = new Date(fechaISO)
+  return d.toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }).split('/').reverse().join('-')
+}
+
 const loadData = async () => {
   isLoading.value = true
 
@@ -79,8 +86,9 @@ const loadData = async () => {
       .filter((o: any) => o.estado_orden?.toLowerCase() !== 'cancelada' && o.estado_orden?.toLowerCase() !== 'cancelado')
       .map((o: any) => ({
         id_orden: o.id_orden,
+        numero_orden: o.numero_orden || `#${o.id_orden}`,
         total: Number(o.total) || 0,
-        fecha: o.fecha_creacion ? o.fecha_creacion.split('T')[0] : new Date().toISOString().split('T')[0],
+        fecha: parseFechaLocal(o.fecha_creacion),
         estado_orden: o.estado_orden,
         id_cliente: o.id_cliente || null,
         nombre_cliente: o.cliente || null
@@ -347,8 +355,8 @@ onMounted(() => {
 
           <tbody>
             <tr v-for="v in ventasFiltradas.slice(0, 20)" :key="v.id_orden">
-              <td>#{{ v.id_orden }}</td>
-              <td>{{ new Date(v.fecha).toLocaleDateString('es-MX') }}</td>
+              <td>{{ v.numero_orden }}</td>
+              <td>{{ v.fecha }}</td>
               <td>{{ v.nombre_cliente || '—' }}</td>
               <td>
                 <span :class="['estado-badge', v.estado_orden?.toLowerCase()]">
