@@ -23,6 +23,13 @@ const app = express();
 
 // MIDDLEWARES (Limpios y sin repeticiones)
 app.use(express.json());
+app.options('*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:5174', 'https://*.vercel.app', 'https://coffe-code-*.onrender.com'],
   methods: ["GET", "POST", "PUT", "DELETE"],
