@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { useSocket } from '../composables/useSocket'
 import API_URL from '../config/api'
 
 const authStore = useAuthStore()
+const { connect } = useSocket()
+let socket: ReturnType<typeof connect> | null = null
 
 // ── VERIFICACIÓN DE PERMISOS (Admin = 1, Caja = 2) ───────────────────────────
 const canEdit = computed(() => {
@@ -22,12 +25,6 @@ const API_BASE = `${API_URL}/api`
 const searchQuery = ref('')
 const statusFilter = ref('activos')
 
-// ── ESTADOS PARA PROMOCIONES ─────────────────────────────────────────────────
-const promocionesCatalogo = ref<any[]>([]) // Todas las promos existentes
-const promocionesActualesCliente = ref<any[]>([]) // Promos que ya tiene el cliente
-const idPromocionParaVincular = ref('') // Selección del dropdown
-const isLoadingPromos = ref(false)
-
 // ── UTILIDAD PARA LIMPIAR TEXTOS ─────────────────────────────────────────────
 const cleanText = (str: string) => {
   if (!str) return ''
@@ -41,7 +38,7 @@ const fetchConToken = async (endpoint: string, method = 'GET', body: any = null)
       method,
       headers: {
         'Content-Type': 'application/json',
-        'auth-token': authStore.token || '' 
+        'auth-token': authStore.token || ''
       }
     }
     if (body) options.body = JSON.stringify(body)
@@ -62,67 +59,79 @@ const loadClientes = async () => {
     fetchConToken('/clientes/mostrar-activos'),
     fetchConToken('/clientes/mostrar-inactivos')
   ])
-  
+
   const clientesActivos = (activosRes.datos || []).map((c: any) => ({ ...c, _activo: true }))
   const clientesInactivos = (inactivosRes.datos || []).map((c: any) => ({ ...c, _activo: false }))
-  
+
   clientes.value = [...clientesActivos, ...clientesInactivos]
   isLoading.value = false
 }
 
-// ── MÉTODOS DE PROMOCIONES ───────────────────────────────────────────────────
-const loadPromocionesCatalogo = async () => {
-  const res = await fetchConToken('/promociones/mostrar')
-  if (res.status === 'ok') {
-    promocionesCatalogo.value = res.datos || []
-  }
-}
+// ── RFID ───────────────────────────────────────────────────────────────────
+const rfidListening = ref(false)
+const rfidError = ref('')
+const rfidUidInput = ref('')
+const rfidSocketData = ref<any>(null)
 
-const loadPromocionesDelCliente = async (id_cliente: number) => {
-  isLoadingPromos.value = true
-  const res = await fetchConToken('/promociones/clientes/mostrar')
-  if (res.status === 'ok') {
-    // Filtramos para obtener solo las promos del cliente actual que estén activas
-    promocionesActualesCliente.value = (res.datos || []).filter(
-      (p: any) => p.id_cliente === id_cliente && p.promocion_activa === true
-    )
-  }
-  isLoadingPromos.value = false
-}
+const toggleRfidListening = async () => {
+  rfidListening.value = !rfidListening.value
+  rfidError.value = ''
 
-const handleVincularPromocion = async () => {
-  if (!idPromocionParaVincular.value || !formData.value.id_cliente) return
+  if (rfidListening.value) {
+    rfidUidInput.value = ''
+    rfidError.value = ''
+    displayToast('Escuchando RFID...', 'warning')
 
-  const payload = {
-    id_cliente: formData.value.id_cliente,
-    id_promocion: Number(idPromocionParaVincular.value)
-  }
-
-  const res = await fetchConToken('/promociones/clientes/vincular', 'POST', payload)
-  
-  if (res.status === 'ok' || res.status === 201) {
-    idPromocionParaVincular.value = ''
-    await loadPromocionesDelCliente(formData.value.id_cliente)
+    socket = connect()
+    socket.off('rfid_detectado')
+    socket.on('rfid_detectado', (data: { uid: string; status?: string; mensaje?: string }) => {
+      rfidUidInput.value = data.uid
+      rfidListening.value = false
+      rfidSocketData.value = data
+      formData.value.codigo_rfid = data.uid
+      playSound('beep')
+    })
   } else {
-    alert(res.mensaje || 'La promoción ya está vinculada o no se pudo asignar.')
+    if (socket) {
+      socket.off('rfid_detectado')
+    }
+    rfidSocketData.value = null
   }
 }
 
-const handleDesvincularPromocion = async (id_promocion: number) => {
-  if (!confirm('¿Quitar esta promoción al cliente?')) return
+const playSound = (type: 'beep' | 'success' | 'error') => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const osc = audioCtx.createOscillator()
+    const gain = audioCtx.createGain()
+    osc.connect(gain)
+    gain.connect(audioCtx.destination)
+    const now = audioCtx.currentTime
+    if (type === 'beep') {
+      osc.frequency.setValueAtTime(1200, now)
+      gain.gain.setValueAtTime(0.25, now)
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15)
+      osc.start(now)
+      osc.stop(now + 0.15)
+    } else if (type === 'success') {
+      osc.frequency.setValueAtTime(880, now)
+      osc.frequency.setValueAtTime(1100, now + 0.1)
+      gain.gain.setValueAtTime(0.3, now)
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3)
+      osc.start(now)
+      osc.stop(now + 0.3)
+    } else if (type === 'error') {
+      osc.frequency.setValueAtTime(200, now)
+      gain.gain.setValueAtTime(0.3, now)
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3)
+      osc.start(now)
+      osc.stop(now + 0.3)
+    }
+  } catch (e) { console.log('Audio not supported') }
+}
 
-  const payload = {
-    id_cliente: formData.value.id_cliente,
-    id_promocion: id_promocion
-  }
-
-  const res = await fetchConToken('/promociones/clientes/desvincular', 'DELETE', payload)
-  
-  if (res.status === 'ok') {
-    await loadPromocionesDelCliente(formData.value.id_cliente)
-  } else {
-    alert('No se pudo desvincular la promoción.')
-  }
+const displayToast = (msg: string, type: 'success' | 'warning' | 'error' = 'success') => {
+  console.log(`[Toast ${type}]: ${msg}`)
 }
 
 // ── ESTADOS Y LÓGICA DEL MODAL ───────────────────────────────────────────────
@@ -132,32 +141,37 @@ const formData = ref<Record<string, any>>({})
 const isSubmitting = ref(false)
 
 const openModal = async (type: 'crear' | 'editar', cliente: any = null) => {
-  if (!canEdit.value) return 
+  if (!canEdit.value) return
 
   modalType.value = type
   if (type === 'crear') {
     formData.value = { nombre: '', email: '', telefono: '' }
-    promocionesActualesCliente.value = []
   } else if (type === 'editar') {
-    formData.value = { 
+    formData.value = {
       id_cliente: cliente.id_cliente,
-      nombre: cliente.nombre, 
-      email: cliente.email || '', 
+      nombre: cliente.nombre,
+      email: cliente.email || '',
       telefono: cliente.telefono || '',
-      activo: cliente.activo ?? cliente._activo 
+      activo: cliente.activo ?? cliente._activo,
+      codigo_rfid: cliente.codigo_rfid || null
     }
-    // Cargamos catálogos y las promos que ya tiene este cliente
-    await loadPromocionesCatalogo()
-    await loadPromocionesDelCliente(cliente.id_cliente)
   }
+  rfidUidInput.value = ''
+  rfidError.value = ''
+  rfidSocketData.value = null
+  rfidListening.value = false
   showModal.value = true
 }
 
 const closeModal = () => {
   showModal.value = false
   formData.value = {}
-  promocionesActualesCliente.value = []
-  idPromocionParaVincular.value = ''
+  rfidUidInput.value = ''
+  rfidError.value = ''
+  rfidSocketData.value = null
+  if (socket) {
+    socket.off('rfid_detectado')
+  }
 }
 
 const handleSubmit = async () => {
@@ -172,7 +186,7 @@ const handleSubmit = async () => {
   } else if (modalType.value === 'editar') {
     endpoint = `/clientes/modificar/${payload.id_cliente}`
     method = 'PUT'
-    delete payload.id_cliente 
+    delete payload.id_cliente
   }
 
   const res = await fetchConToken(endpoint, method, payload)
@@ -186,24 +200,48 @@ const handleSubmit = async () => {
   }
 }
 
+const desvincularRfid = async () => {
+  if (!formData.value.id_cliente) return
+  if (!confirm('¿Desvincular el RFID de este cliente?')) return
+
+  const res = await fetchConToken(`/clientes/modificar/${formData.value.id_cliente}`, 'PUT', {
+    ...formData.value,
+    codigo_rfid: null
+  })
+
+  if (res.status === 'ok') {
+    formData.value.codigo_rfid = null
+    displayToast('RFID desvinculado', 'success')
+    loadClientes()
+  } else {
+    alert(`Error: ${res.mensaje || 'No se pudo desvincular el RFID'}`)
+  }
+}
+
 // ── FILTROS COMPUTADOS ───────────────────────────────────────────────────────
 const term = computed(() => cleanText(searchQuery.value))
 
 const filteredClientes = computed(() => {
   return clientes.value.filter(c => {
-    const matchSearch = cleanText(c.nombre).includes(term.value) || 
-                        cleanText(c.email).includes(term.value) || 
+    const matchSearch = cleanText(c.nombre).includes(term.value) ||
+                        cleanText(c.email).includes(term.value) ||
                         cleanText(c.telefono).includes(term.value)
-    
-    const matchStatus = statusFilter.value === 'todos' ? true : 
+
+    const matchStatus = statusFilter.value === 'todos' ? true :
                        (statusFilter.value === 'activos' ? c._activo : !c._activo)
-    
+
     return matchSearch && matchStatus
   })
 })
 
 onMounted(() => {
   loadClientes()
+})
+
+onUnmounted(() => {
+  if (socket) {
+    socket.off('rfid_detectado')
+  }
 })
 </script>
 
@@ -244,7 +282,7 @@ onMounted(() => {
 
       <div v-else class="grid-container">
         <div v-if="filteredClientes.length === 0" class="empty-state">No se encontraron clientes con esos filtros.</div>
-        
+
         <div v-for="cliente in filteredClientes" :key="cliente.id_cliente" :class="['card', { 'inactive-card': !cliente._activo }]">
           <div class="card-header">
             <div class="client-info">
@@ -256,7 +294,7 @@ onMounted(() => {
               </div>
             </div>
           </div>
-          
+
           <div class="card-body">
             <div class="contact-row">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
@@ -267,13 +305,14 @@ onMounted(() => {
               <span class="truncate-text" :title="cliente.email">{{ cliente.email || 'Sin correo' }}</span>
             </div>
           </div>
-          
+
           <div class="card-footer mt-auto">
             <div class="badges-container">
               <span v-if="cliente._activo" class="badge success">Activo</span>
               <span v-else class="badge danger">Dado de baja</span>
+              <span v-if="cliente.codigo_rfid" class="badge info">RFID</span>
             </div>
-            
+
             <div v-if="canEdit" class="actions-container">
               <button @click="openModal('editar', cliente)" class="action-btn edit-btn" title="Modificar Cliente">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
@@ -289,9 +328,9 @@ onMounted(() => {
         <h2 class="modal-title">
           {{ modalType === 'crear' ? 'Registrar Nuevo Cliente' : 'Modificar Cliente' }}
         </h2>
-        
+
         <form @submit.prevent="handleSubmit" class="modal-form">
-          
+
           <div class="form-group">
             <label>Nombre del Cliente (Requerido):</label>
             <input v-model="formData.nombre" type="text" required class="form-input" placeholder="Ej. Roberto Calderón" />
@@ -309,36 +348,6 @@ onMounted(() => {
           </div>
 
           <template v-if="modalType === 'editar'">
-            
-            <div class="promociones-section">
-              <label class="section-subtitle">Promociones Vinculadas</label>
-              
-              <div class="promos-list" v-if="promocionesActualesCliente.length > 0">
-                <div v-for="promo in promocionesActualesCliente" :key="promo.id_promocion" class="promo-tag">
-                  <span>{{ promo.nombre_promocion }}</span>
-                  <button type="button" @click="handleDesvincularPromocion(promo.id_promocion)" class="remove-promo-btn" title="Quitar promoción">
-                    &times;
-                  </button>
-                </div>
-              </div>
-              <p v-else-if="!isLoadingPromos" class="empty-promos-text">El cliente no tiene promociones asignadas actualmente.</p>
-              <p v-else class="empty-promos-text">Cargando promociones...</p>
-
-              <div class="add-promo-row">
-                <select v-model="idPromocionParaVincular" class="form-select-small">
-                  <option value="" disabled>Selecciona una promoción para agregar...</option>
-                  <option v-for="p in promocionesCatalogo" :key="p.id_promocion" :value="p.id_promocion">
-                    {{ p.nombre_promocion }}
-                  </option>
-                </select>
-                <button type="button" @click="handleVincularPromocion" class="btn-add-inline" :disabled="!idPromocionParaVincular">
-                  Asignar
-                </button>
-              </div>
-            </div>
-
-            <hr style="border-top: 1px dashed var(--color-borde); width: 100%; margin: 16px 0;" />
-            
             <div class="switch-container">
               <label class="switch-label">
                 <div>
@@ -350,6 +359,33 @@ onMounted(() => {
                 <input type="checkbox" v-model="formData.activo">
                 <span class="slider round"></span>
               </label>
+            </div>
+
+            <hr style="border-top: 1px dashed var(--color-borde); width: 100%; margin: 8px 0;" />
+
+            <div class="rfid-section">
+              <label class="section-subtitle">Código RFID</label>
+
+              <div v-if="formData.codigo_rfid" class="rfid-status-box">
+                <div class="rfid-info">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="rfid-icon"><path d="M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 4"></path><path d="M5 19.5C5.5 18 6 15 6 12c0-.7.12-1.37.34-2"></path><path d="M17.29 21.02c.12-.6.5-1.17 1.18-1.78a9.04 9.04 0 0 0-1.58-1.08c-.57-.33-1.2-.5-1.88-.5a4 4 0 0 0-4 4c0 1.1.4 2.1 1 2.82"></path><path d="M12 22c-5.5 0-10-4.5-10-10S6.5 2 12 2s10 4.5 10 10a10 10 0 0 1-10 10z"></path></svg>
+                  <span class="rfid-assigned">Tarjeta vinculada</span>
+                </div>
+                <div class="rfid-actions">
+                  <button type="button" @click="desvincularRfid" class="btn-rfid-desvincular">
+                    Desvincular RFID
+                  </button>
+                </div>
+              </div>
+
+              <div v-else class="rfid-empty">
+                <p class="rfid-empty-text">Sin RFID vinculado</p>
+                <button type="button" @click="toggleRfidListening" :class="['btn-rfid', { 'btn-rfid-active': rfidListening }]" :disabled="isSubmitting">
+                  {{ rfidListening ? '⬤ Escuchando...' : 'Escuchar RFID' }}
+                </button>
+                <input v-if="rfidUidInput" v-model="rfidUidInput" readonly class="form-input rfid-uid-display" placeholder="UID detectado..." />
+                <p v-if="rfidError" class="rfid-error">{{ rfidError }}</p>
+              </div>
             </div>
           </template>
 
@@ -367,7 +403,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* ── ESTILOS REUTILIZADOS Y ESPECÍFICOS DE CLIENTES ── */
 .menu-container { padding: var(--espacio-6, 24px); color: var(--tenant-texto, #111827); display: flex; flex-direction: column; gap: var(--espacio-6, 24px); min-height: 100%; }
 .menu-header { display: flex; flex-direction: column; gap: var(--espacio-2, 8px); }
 .page-title { font-size: var(--font-size-2xl, 30px); font-weight: var(--font-weight-bold, 600); margin: 0; }
@@ -382,7 +417,7 @@ onMounted(() => {
 .search-input { border: none; background: transparent; outline: none; width: 100%; font-size: var(--font-size-sm, 13px); color: var(--tenant-texto, #111827); font-family: inherit; }
 
 .filters-group { display: flex; gap: var(--espacio-3, 12px); flex-wrap: wrap; }
-.filter-select { padding: var(--espacio-2, 8px) var(--espacio-3, 12px); font-size: var(--font-size-sm, 13px); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; background-color: var(--color-superficie, #ffffff); color: var(--tenant-texto, #111827); outline: none; cursor: pointer; }
+.filter-select { padding: var(--espacio-2, 8px) var(--espacio-3, 12px); font-size: var(--font-size-sm, 13px); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; background-color: var(--color-superficie, #ffffff); color: var(--tenant-texto, #111827); outline: none; cursor: pointer; transition: border-color 0.2s; }
 
 .btn-primary { background-color: var(--tenant-primario, #002D72); color: white; padding: 8px 16px; border-radius: 6px; border: none; font-size: var(--font-size-sm, 13px); font-weight: 500; cursor: pointer; transition: opacity 0.2s; white-space: nowrap; }
 .btn-primary:hover { opacity: 0.9; }
@@ -415,10 +450,11 @@ onMounted(() => {
 .badges-container { display: flex; flex-wrap: wrap; gap: var(--espacio-2, 8px); flex: 1; align-items: center; }
 .badge { font-size: var(--font-size-xs, 11px); padding: 4px 8px; border-radius: 4px; font-weight: var(--font-weight-medium, 500); }
 .badge.success { background-color: rgba(22, 163, 74, 0.1); color: var(--color-exitoso, #16a34a); border: 1px solid rgba(22, 163, 74, 0.2); }
-.badge.danger { background-color: rgba(220, 38, 38, 0.1); color: var(--color-cancelar, #ef4444); border: 1px solid rgba(220, 38, 38, 0.2); }
+.badge.danger { background-color: rgba(220, 38, 38, 0.1); color: var(--color-cancelar, #ef4444); border: 1px solid rgba(220,38,38,0.2); }
+.badge.info { background-color: rgba(37, 99, 235, 0.1); color: var(--color-info, #2563eb); border: 1px solid rgba(37, 99, 235, 0.2); }
 
 .actions-container { display: flex; gap: var(--espacio-2, 8px); }
-.action-btn { background: var(--color-superficie, #ffffff); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--tenant-texto-muted, #6b7280); }
+.action-btn { background: var(--color-superficie, #ffffff); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 6px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--tenant-texto-muted, #6b7280); transition: all 0.2s; }
 .action-btn svg { width: 16px; height: 16px; }
 .edit-btn:hover { background-color: rgba(37, 99, 235, 0.1); border-color: var(--color-info, #2563eb); color: var(--color-info, #2563eb); }
 
@@ -448,18 +484,26 @@ input:checked + .slider:before { transform: translateX(20px); }
 .slider.round { border-radius: 24px; }
 .slider.round:before { border-radius: 50%; }
 
-/* ── ESTILOS DE PROMOCIONES EN MODAL ── */
-.promociones-section { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--color-borde); }
+/* ── RFID SECTION ── */
+.rfid-section { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--color-borde); }
 .section-subtitle { display: block; font-size: var(--font-size-sm, 13px); font-weight: 600; color: var(--tenant-texto, #111827); margin-bottom: 12px; }
-.promos-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-.promo-tag { display: flex; align-items: center; gap: 6px; background-color: rgba(37, 99, 235, 0.1); color: var(--color-info, #2563eb); border: 1px solid rgba(37, 99, 235, 0.2); padding: 4px 10px; border-radius: 16px; font-size: var(--font-size-xs, 11px); font-weight: 500; }
-.remove-promo-btn { background: none; border: none; color: var(--color-info, #2563eb); font-size: 16px; cursor: pointer; line-height: 1; padding: 0; transition: color 0.2s; }
-.remove-promo-btn:hover { color: var(--color-cancelar, #ef4444); }
-.empty-promos-text { font-size: var(--font-size-xs, 11px); color: var(--tenant-texto-muted); margin-bottom: 16px; font-style: italic; }
-.add-promo-row { display: flex; gap: 8px; }
-.form-select-small { flex: 1; padding: 8px 10px; border: 1px solid var(--color-borde); border-radius: 6px; font-size: var(--font-size-sm, 13px); outline: none; font-family: inherit; color: var(--tenant-texto); }
-.btn-add-inline { background-color: var(--tenant-secundario, #5C2D6D); color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: var(--font-size-sm, 13px); font-weight: 500; cursor: pointer; transition: opacity 0.2s; }
-.btn-add-inline:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.rfid-status-box { display: flex; flex-direction: column; gap: 10px; }
+.rfid-info { display: flex; align-items: center; gap: 8px; }
+.rfid-icon { width: 20px; height: 20px; color: var(--color-exitoso, #16a34a); }
+.rfid-assigned { font-size: var(--font-size-sm, 13px); color: var(--color-exitoso, #16a34a); font-weight: 500; }
+.rfid-actions { display: flex; gap: 8px; }
+.btn-rfid-desvincular { background-color: rgba(220, 38, 38, 0.1); color: var(--color-cancelar, #ef4444); border: 1px solid rgba(220, 38, 38, 0.2); padding: 6px 12px; border-radius: 6px; font-size: var(--font-size-xs, 11px); font-weight: 500; cursor: pointer; transition: all 0.2s; }
+.btn-rfid-desvincular:hover { background-color: rgba(220, 38, 38, 0.2); }
+
+.rfid-empty { display: flex; flex-direction: column; gap: 10px; }
+.rfid-empty-text { font-size: var(--font-size-xs, 11px); color: var(--tenant-texto-muted); font-style: italic; margin: 0; }
+.btn-rfid { background-color: var(--tenant-primario, #002D72); color: white; padding: 8px 16px; border-radius: 6px; border: none; font-size: var(--font-size-sm, 13px); font-weight: 500; cursor: pointer; transition: opacity 0.2s; align-self: flex-start; }
+.btn-rfid:hover { opacity: 0.9; }
+.btn-rfid-active { background-color: #16a34a; }
+.btn-rfid:disabled { opacity: 0.5; cursor: not-allowed; }
+.rfid-uid-display { font-size: var(--font-size-xs, 11px); color: var(--tenant-texto-muted); background-color: var(--color-superficie-alt, #f3f4f6); }
+.rfid-error { font-size: var(--font-size-xs, 11px); color: var(--color-cancelar, #ef4444); margin: 0; }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--espacio-3, 12px); margin-top: var(--espacio-2, 8px); padding-top: var(--espacio-4, 16px); border-top: 1px solid var(--color-borde, #e5e7eb); }
 </style>

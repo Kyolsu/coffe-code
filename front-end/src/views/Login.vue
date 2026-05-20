@@ -131,7 +131,7 @@ const handleLogin = async () => {
 
       <!-- Watermark -->
       <div class="login-watermark">
-        <span>Software por</span>
+        <span>Software</span>
         <strong>CoffeeCode</strong>
       </div>
     </div>

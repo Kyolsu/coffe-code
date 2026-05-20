@@ -393,7 +393,7 @@ const handleLogout = () => {
       </div>
 
       <div class="watermark">
-        <span class="watermark-label">Software por</span>
+        <span class="watermark-label">Software</span>
         <strong class="watermark-brand">CoffeeCode</strong>
       </div>
     </main>
