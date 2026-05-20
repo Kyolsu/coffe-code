@@ -42,3 +42,4 @@ __screenshots__/
 backend/node_modules/
 backend/.env
 
+backend/coffecode_local.sql/

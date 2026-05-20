@@ -10,11 +10,20 @@ const authStore = useAuthStore()
 const API_BASE = `${API_URL}/api`
 
 // ── TIPOS ──────────────────────────────────────────────
+interface PackageSelection {
+  grupo: string
+  name: string
+  modifiers: string[]
+}
+
 interface OrderItem {
   name: string
   qty: number
   customizations: string[]
   extras: { name: string; qty: number }[]
+  modifiers: string[]
+  isPackage?: boolean
+  selections?: PackageSelection[]
 }
 
 interface Order {
@@ -24,6 +33,7 @@ interface Order {
   items: OrderItem[]
   status: 'pendiente'
   createdAt: string
+  tipo_orden?: string
 }
 
 // ── ROL ────────────────────────────────────────────────
@@ -76,13 +86,17 @@ const loadOrders = async () => {
   isLoading.value = true
   error.value = null
 
-  const [ordenesRes, detallesRes] = await Promise.all([
+  const [ordenesRes, detallesRes, modificadoresRes, seleccionesRes] = await Promise.all([
     fetchConToken('/ordenes/cocina'),
-    fetchConToken('/ordenes/detalles/mostrar')
+    fetchConToken('/ordenes/detalles/mostrar'),
+    fetchConToken('/ordenes/detalles-modificadores/mostrar'),
+    fetchConToken('/ordenes/paquete-seleccion/mostrar')
   ])
 
   if (ordenesRes.status === 'ok' && ordenesRes.datos) {
     const detalles = detallesRes.datos || []
+    const modificadores = modificadoresRes.datos || []
+    const selecciones = seleccionesRes.datos || []
 
     orders.value = ordenesRes.datos
       .filter((o: any) => {
@@ -91,18 +105,43 @@ const loadOrders = async () => {
       })
       .map((o: any) => {
         let ordenDetalles = detalles.filter((d: any) => d.id_orden === o.id_orden)
-        
-        // Filtrar por zona si hay una seleccionada
+
         if (selectedZona.value !== null) {
           ordenDetalles = ordenDetalles.filter((d: any) => d.id_zona === selectedZona.value)
         }
-        
-        const items: OrderItem[] = ordenDetalles.map((d: any) => ({
-          name: d.nombre_producto || d.nombre_paquete || 'Producto',
-          qty: d.cantidad || 1,
-          customizations: d.notas ? [d.notas] : [],
-          extras: []
-        }))
+
+        const items: OrderItem[] = ordenDetalles.map((d: any) => {
+          const detailMods = modificadores.filter((m: any) => m.id_orden_detalle === d.id_orden_detalle)
+
+          const itemMods = detailMods.map((m: any) => m.nombre_ingrediente)
+
+          const isPackageItem = !!d.id_paquete
+
+          const itemSelections: PackageSelection[] | undefined = isPackageItem
+            ? selecciones
+                .filter((s: any) => s.id_orden_detalle === d.id_orden_detalle)
+                .map((s: any) => {
+                  const selMods = modificadores
+                    .filter((m: any) => m.id_seleccion === s.id_seleccion)
+                    .map((m: any) => m.nombre_ingrediente)
+                  return {
+                    grupo: s.nombre_grupo || '',
+                    name: s.nombre_producto || 'Opción',
+                    modifiers: selMods
+                  }
+                })
+            : undefined
+
+          return {
+            name: d.nombre_producto || d.nombre_paquete || 'Producto',
+            qty: d.cantidad || 1,
+            customizations: d.notas ? [d.notas] : [],
+            extras: [],
+            modifiers: itemMods,
+            isPackage: isPackageItem,
+            selections: itemSelections
+          }
+        })
 
         return {
           id: o.id_orden,
@@ -110,10 +149,11 @@ const loadOrders = async () => {
           numero_orden: o.numero_orden || o.id_orden,
           items,
           status: 'pendiente' as const,
-          createdAt: o.fecha_creacion ? new Date(o.fecha_creacion).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '--:--'
+          createdAt: o.fecha_creacion ? new Date(o.fecha_creacion).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '--:--',
+          tipo_orden: o.tipo_orden
         }
       })
-      .filter((o: Order) => o.items.length > 0) // Solo mostrar órdenes que tienen items en la zona seleccionada
+      .filter((o: Order) => o.items.length > 0)
   } else {
     error.value = ordenesRes.mensaje || 'Error al cargar órdenes de cocina'
   }
@@ -145,6 +185,46 @@ const handleKeydown = (e: KeyboardEvent) => {
   }
   if (e.key === 'Escape') {
     selectedId.value = null
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    navigateOrders(3)
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    navigateOrders(-3)
+  }
+  if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    navigateOrders(1)
+  }
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    navigateOrders(-1)
+  }
+  if (e.key.toLowerCase() === 'r' && selectedId.value !== null) {
+    e.preventDefault()
+    markRejected(selectedId.value)
+  }
+}
+
+const navigateOrders = (direction: number) => {
+  if (orders.value.length === 0) return
+  const currentIndex = selectedId.value !== null ? orders.value.findIndex(o => o.id === selectedId.value) : -1
+  let newIndex = currentIndex + direction
+  if (newIndex < 0) newIndex = orders.value.length - 1
+  if (newIndex >= orders.value.length) newIndex = 0
+  const newOrder = orders.value[newIndex]
+  if (newOrder) selectedId.value = newOrder.id
+}
+
+const markRejected = async (id: number) => {
+  const res = await fetchConToken(`/ordenes/modificar/${id}`, 'PUT', { estado_orden: 'cancelada' })
+  if (res.status === 'ok') {
+    orders.value = orders.value.filter(o => o.id !== id)
+    selectedId.value = null
+  } else {
+    error.value = res.mensaje || 'Error al rechazar orden'
   }
 }
 
@@ -226,9 +306,10 @@ const handleLogout = () => {
             <span class="kd-count-label">pendientes</span>
           </div>
           <div v-if="selectedId !== null" class="kd-hint">
-            <kbd>Enter</kbd> para marcar como lista
-            &nbsp;·&nbsp;
-            <kbd>Esc</kbd> para deseleccionar
+            <kbd>↑↓←→</kbd> navegar &nbsp;·&nbsp; <kbd>R</kbd> cancelar &nbsp;·&nbsp; <kbd>Enter</kbd> listo
+          </div>
+          <div v-else class="kd-hint">
+            <kbd>↑↓←→</kbd> navegar órdenes
           </div>
         </div>
       </header>
@@ -256,14 +337,36 @@ const handleLogout = () => {
         >
           <div class="order-header">
             <span class="order-number">Orden: {{ order.numero_orden }}</span>
-            <span class="order-time">{{ order.createdAt }}</span>
+            <span class="order-header-right">
+              <span v-if="order.tipo_orden === 'para_llevar'" class="badge-tipo">📦 Para Llevar</span>
+              <span v-else-if="order.tipo_orden === 'delivery'" class="badge-tipo">🚴 Delivery</span>
+              <span v-else class="badge-tipo">🍽️ Local</span>
+              <span class="order-time">{{ order.createdAt }}</span>
+            </span>
           </div>
 
           <div class="order-items">
             <div v-for="(item, i) in order.items" :key="i" class="order-item">
               <div class="order-item-header">
-                <span class="order-item-name">{{ item.name }}</span>
+                <span class="order-item-name">
+                  {{ item.name }}
+                  <span v-if="item.isPackage" class="badge-package">PAQ</span>
+                </span>
                 <span class="order-item-qty">× {{ item.qty }}</span>
+              </div>
+              <div v-if="item.modifiers.length" class="order-modifiers">
+                <span v-for="m in item.modifiers" :key="m" class="modifier-tag">{{ m }}</span>
+              </div>
+              <div v-if="item.selections && item.selections.length" class="order-selections">
+                <div v-for="sel in item.selections" :key="sel.name" class="selection-item">
+                  <div class="selection-header">
+                    <span v-if="sel.grupo" class="selection-grupo">{{ sel.grupo }}:</span>
+                    <span class="selection-name">{{ sel.name }}</span>
+                  </div>
+                  <div v-if="sel.modifiers.length" class="order-modifiers">
+                    <span v-for="m in sel.modifiers" :key="m" class="modifier-tag">{{ m }}</span>
+                  </div>
+                </div>
               </div>
               <div v-if="item.customizations.length" class="order-customizations">
                 <span v-for="c in item.customizations" :key="c" class="custom-tag">{{ c }}</span>
@@ -549,6 +652,21 @@ kbd {
   padding: 2px 8px;
 }
 
+.order-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--espacio-2, 8px);
+}
+
+.badge-tipo {
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 15%, transparent);
+}
+
 /* Items dentro de la orden */
 .order-items {
   flex: 1;
@@ -601,6 +719,66 @@ kbd {
   color: var(--color-advertencia, #d97706);
   background: color-mix(in srgb, var(--color-advertencia, #d97706) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-advertencia, #d97706) 20%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.order-selections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espacio-1, 4px);
+  padding-left: var(--espacio-3, 12px);
+  margin-top: 2px;
+}
+
+.selection-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.selection-header {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.selection-grupo {
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  color: color-mix(in srgb, var(--tenant-texto) 50%, transparent);
+  text-transform: uppercase;
+}
+
+.selection-name {
+  font-size: var(--font-size-xs, 12px);
+  font-weight: 600;
+  color: var(--tenant-texto);
+}
+
+.badge-package {
+  font-size: 9px;
+  background: var(--tenant-primario);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.order-modifiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--espacio-1, 4px);
+  padding-left: var(--espacio-2, 8px);
+  margin-top: 2px;
+}
+
+.modifier-tag {
+  font-size: var(--font-size-xs, 11px);
+  color: var(--tenant-primario);
+  background: color-mix(in srgb, var(--tenant-primario) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-primario) 20%, transparent);
   border-radius: 4px;
   padding: 1px 6px;
 }
