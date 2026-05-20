@@ -1127,36 +1127,42 @@ const handleRfidInput = async () => {
   playSound('beep')
 
   // Si viene data del socket, ya tiene todo - no hacer segundo request
-  if (rfidSocketData && rfidSocketData.cliente) {
-    rfidDetectedClient.value = {
-      id_cliente: rfidSocketData.cliente.id_cliente,
-      nombre: rfidSocketData.cliente.nombre,
-      beneficios: rfidSocketData.beneficios || []
+  if (rfidSocketData) {
+    // Cliente identificado correctamente
+    if (rfidSocketData.cliente) {
+      rfidDetectedClient.value = {
+        id_cliente: rfidSocketData.cliente.id_cliente,
+        nombre: rfidSocketData.cliente.nombre,
+        beneficios: rfidSocketData.beneficios || []
+      }
+      displayToast(`Cliente ${rfidDetectedClient.value.nombre} identificado`, 'success')
+      showClientConfirmModal.value = true
+      rfidSocketData = null
+      rfidInput.value = ''
+      return
     }
-    displayToast(`Cliente ${rfidDetectedClient.value.nombre} identificado`, 'success')
-    showClientConfirmModal.value = true
-    rfidSocketData = null
-    rfidInput.value = ''
-    return
-  }
 
-  // Si viene del socket con error, mostrar error
-  if (rfidSocketData && rfidSocketData.status === 'no_registrado') {
-    rfidError.value = 'Tarjeta no vinculada a ningún cliente'
-    displayToast('Cliente no encontrado', 'error')
-    playSound('error')
-    rfidSocketData = null
-    rfidInput.value = ''
-    return
-  }
+    // Errores del socket
+    if (rfidSocketData.status === 'no_registrado') {
+      rfidError.value = 'Tarjeta no vinculada a ningún cliente'
+      displayToast('Cliente no encontrado', 'error')
+      playSound('error')
+      rfidSocketData = null
+      rfidInput.value = ''
+      return
+    }
 
-  if (rfidSocketData && rfidSocketData.status === 'inactivo') {
-    rfidError.value = 'El cliente está desactivado en el sistema'
-    displayToast('Cliente desactivado', 'error')
-    playSound('error')
+    if (rfidSocketData.status === 'inactivo') {
+      rfidError.value = 'El cliente está desactivado en el sistema'
+      displayToast('Cliente desactivado', 'error')
+      playSound('error')
+      rfidSocketData = null
+      rfidInput.value = ''
+      return
+    }
+
+    // Si tiene status pero no cliente ni error, continuar al fallback manual
     rfidSocketData = null
-    rfidInput.value = ''
-    return
   }
 
   // Solo para entrada manual (tecleado), llamar API

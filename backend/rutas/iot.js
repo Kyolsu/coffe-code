@@ -78,6 +78,12 @@ router.get('/rfid/:uid', async (req, res) => {
         const clienteRes = await db.query(clienteQuery, [cleanUid]);
 
         if (clienteRes.rows.length === 0) {
+            io.emit('rfid_detectado', {
+                uid: cleanUid,
+                status: 'no_registrado',
+                mensaje: 'Tarjeta no vinculada a ningún cliente.',
+                timestamp: new Date().toISOString()
+            });
             return res.status(404).json({ status: "no_registrado", mensaje: "Tarjeta no vinculada a ningún cliente." });
         }
 
