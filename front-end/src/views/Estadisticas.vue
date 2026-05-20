@@ -68,9 +68,10 @@ const filtroCliente = ref<string>('todos')
 
 // ── CARGA DE DATOS ─────────────────────
 const parseFechaLocal = (fechaISO: string | null | undefined): string => {
-  if (!fechaISO) return new Date().toISOString().split('T')[0]
+  if (!fechaISO) return new Date().toISOString().split('T')[0] ?? ''
   const d = new Date(fechaISO)
-  return d.toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }).split('/').reverse().join('-')
+  const partes = d.toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }).split('/')
+  return `${partes[2]}-${partes[1]?.padStart(2, '0') ?? '01'}-${partes[0]?.padStart(2, '0') ?? '01'}`
 }
 
 const loadData = async () => {
