@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { API_URL } from '../config/api'
 
 // ── VISTAS Y LAYOUTS ────────────────────────────────────────────────────────
 import MainLayout          from '../layouts/MainLayout.vue' // <-- Importa tu nuevo layout
@@ -22,6 +23,11 @@ const router = createRouter({
     },
     {
       path: '/menu-publico',
+      name: 'menu-publico',
+      component: () => import('../views/VistaPublica.vue'),
+    },
+    {
+      path: '/vista-publica',
       name: 'vista-publica',
       component: () => import('../views/VistaPublica.vue'),
     },
@@ -117,7 +123,7 @@ const ROL_MAP: Record<string, string> = {
 }
 
 // ── RUTAS PÚBLICAS (sin validación de token) ───────────────────────────────
-const RUTAS_PUBLICAS = ['login', 'vista-publica']
+const RUTAS_PUBLICAS = ['login', 'vista-publica', 'menu-publico']
 
 // ── VERIFICACIÓN DE TOKEN CON BACKEND ───────────────────────────────────────
 let tokenValidationPromise: Promise<boolean> | null = null
@@ -127,7 +133,7 @@ async function validarTokenConBackend(): Promise<boolean> {
   if (!token) return false
 
   try {
-    const res = await fetch(`${import.meta.env.RENDER_API_URL || 'https://coffe-code-s7t9.onrender.com'}/api/usuarios/perfil`, {
+    const res = await fetch(`${API_URL}/api/usuarios/perfil`, {
       headers: { 'auth-token': token }
     })
     return res.ok

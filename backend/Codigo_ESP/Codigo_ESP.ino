@@ -28,7 +28,12 @@ MFRC522 rfid(SS_PIN, RST_PIN);
 
 // Control de tiempos (Debounce)
 unsigned long ultimoTiempoBoton = 0;
-const unsigned long tiempoDebounce = 250; 
+const unsigned long tiempoDebounce = 250;
+
+// Control RFID anti-duplicados
+String lastUid = "";
+unsigned long lastRfidTime = 0;
+const unsigned long rfidDebounce = 2000; 
 
 void setup() {
   Serial.begin(115200);
@@ -139,17 +144,24 @@ void leerBotonesTeclado() {
 // 
 void leerRFIDWiFi() {
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) return;
-  
+
   String uidString = "";
   for (byte i = 0; i < rfid.uid.size; i++) {
     uidString += String(rfid.uid.uidByte[i] < 0x10 ? "0" : "");
     uidString += String(rfid.uid.uidByte[i], HEX);
   }
   uidString.toUpperCase();
-  
+
+  if (uidString == lastUid && (millis() - lastRfidTime) < rfidDebounce) {
+    rfid.PICC_HaltA();
+    return;
+  }
+  lastUid = uidString;
+  lastRfidTime = millis();
+
   Serial.println("\n[WI-FI] Tarjeta detectada: " + uidString);
   ejecutarPeticionRFID(uidString);
-  
+
   rfid.PICC_HaltA();
 }
 
