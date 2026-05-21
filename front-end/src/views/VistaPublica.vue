@@ -16,7 +16,7 @@ const isLoading = ref(true)
 const error = ref('')
 
 const pendingOrders = computed(() =>
-  ordenes.value.filter(o => o.estado_orden === 'pendiente' || o.estado_orden === 'en_preparacion')
+  ordenes.value.filter(o => o.estado_orden === 'pendiente')
 )
 
 const readyOrders = computed(() =>
@@ -25,7 +25,7 @@ const readyOrders = computed(() =>
 
 const fetchOrdenes = async () => {
   try {
-    const res = await fetch(`${API_BASE}/ordenes/cocina`)
+    const res = await fetch(`${API_BASE}/ordenes/mostrar`)
     const data = await res.json()
     if (data.status === 'ok') {
       ordenes.value = data.datos || []
@@ -57,12 +57,20 @@ const formatTime = (fecha: string) => {
   const d = new Date(fecha)
   return d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
 }
+
+const logoUrl = import.meta.env.VITE_TIENDA_LOGO_URL || ''
 </script>
 
 <template>
   <div class="layout">
     <header class="header">
-      <h1>Pedidos</h1>
+      <div class="logo-area">
+        <img v-if="logoUrl" :src="logoUrl" alt="Logo" class="logo-img" />
+        <div v-else class="logo-placeholder">Logo</div>
+      </div>
+      <div class="header-center">
+        <h1>Pedidos</h1>
+      </div>
       <div class="refresh-info">
         <span class="dot" :class="{ error: !!error }"></span>
         {{ error }}
@@ -141,9 +149,42 @@ const formatTime = (fecha: string) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px;
+  padding: 16px 24px;
   background: #1a1a1a;
   border-bottom: 1px solid #2a2a2a;
+  gap: 16px;
+}
+
+.logo-area {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+}
+
+.logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.logo-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2a2a2a;
+  border-radius: 8px;
+  color: #57534e;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.header-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
 }
 
 .header h1 {
