@@ -72,7 +72,7 @@ interface Promocion {
   id_promocion: number
   nombre: string
   descripcion: string
-  tipo: string
+  tipo: 'porcentaje' | 'monto' | 'bogo' | 'descuento_fijo'
   valor: number
   es_temporal: boolean
   activo: boolean
@@ -116,7 +116,6 @@ interface CartItem {
   promoGroupId?: number
   promoGroupName?: string
   isPromoItem?: boolean
-  promoId?: number
   packageProductModifiers?: Record<number, IngredienteOpcion[]>
 }
 
@@ -140,38 +139,57 @@ const esMenuActivoAhora = (menu: any): boolean => {
   const diasMap = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']
   const diaActual = diasMap[diaSemana] ?? 'domingo'
 
+  console.log(`[DEBUG esMenuActivoAhora] Evaluando: ${menu.nombre_menu || menu.nombre}`)
+  console.log(`  Hora actual: ${horaActual} (${Math.floor(horaActual/60)}:${horaActual%60})`)
+  console.log(`  Día actual: ${diaActual}`)
+  console.log(`  Hora inicio: ${menu.hora_inicio}, Hora fin: ${menu.hora_fin}`)
+  console.log(`  Días: ${menu.dias_semana}`)
+
+  // Verificar horario
   if (menu.hora_inicio && menu.hora_fin) {
     const horaInicio = menu.hora_inicio.toString().split(':')
     const horaFin = menu.hora_fin.toString().split(':')
     const minutosInicio = parseInt(horaInicio[0]) * 60 + parseInt(horaInicio[1] || '0')
     const minutosFin = parseInt(horaFin[0]) * 60 + parseInt(horaFin[1] || '0')
 
+    console.log(`  Minutos inicio: ${minutosInicio}, Minutos fin: ${minutosFin}`)
+
     let dentroHorario = false
     if (minutosFin < minutosInicio) {
+      // Menú cruza medianoche (ej: 00:01 a 10:00)
       dentroHorario = horaActual >= minutosInicio || horaActual < minutosFin
     } else {
+      // Menú normal (ej: 13:00 a 16:00)
       dentroHorario = horaActual >= minutosInicio && horaActual < minutosFin
     }
+
+    console.log(`  Dentro horario: ${dentroHorario}`)
 
     if (!dentroHorario) {
       return false
     }
   }
 
+  // Verificar días de la semana
   if (menu.dias_semana) {
     let diasStr = menu.dias_semana.toLowerCase()
+    // Reemplazar guiones por comas (Lunes-Viernes -> Lunes,Viernes)
     diasStr = diasStr.replace(/-/g, ',')
+    // Quitar acentos para comparación correcta (Miércoles -> miercoles)
     diasStr = diasStr.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    // Dividir por comas
     const diasArr: string[] = diasStr.split(',')
     const diasMenu = diasArr
       .map((d: string) => d.trim())
       .filter((d: string) => d.length > 0)
-    
+    console.log(`  Días menú (parsed): ${diasMenu}`)
+    console.log(`  Día actual: ${diaActual}, incluye: ${diasMenu.includes(diaActual)}`)
     if (!diasMenu.includes(diaActual)) {
       return false
     }
   }
 
+  console.log(`  RESULTADO: ACTIVO`)
   return true
 }
 
@@ -371,8 +389,10 @@ const fetchConToken = async (endpoint: string, options: RequestInit = {}) => {
 }
 
 const loadData = async () => {
+  console.log('=== loadData START ===')
   isLoading.value = true
   
+  // Cargar todos los menús (activos e inactivos)
   const [menusRes, catRes, prodRes, cliRes] = await Promise.all([
     fetchConToken('/menu/mostrar-activo'),
     fetchConToken('/tienda/categorias/mostrar'),
@@ -380,10 +400,15 @@ const loadData = async () => {
     fetchConToken('/clientes/mostrar-activos')
   ])
 
+  // Guardar todos los menús
   menus.value = menusRes.datos || []
   
+  // Filtrar menús activos ahora (hora y día)
   const menusActivosAhora = menus.value.filter((m: any) => esMenuActivoAhora(m))
+  console.log('DEBUG - Todos los menús:', menus.value.map((m: any) => ({ nombre: m.nombre_menu, hora_inicio: m.hora_inicio, hora_fin: m.hora_fin, dias: m.dias_semana })))
+  console.log('DEBUG - Menús activos ahora:', menusActivosAhora.map((m: any) => ({ nombre: m.nombre_menu })))
   
+  // Obtener productos de cada menú activo ahora
   const productosEnMenuIds = new Set<number>()
   for (const menu of menusActivosAhora) {
     try {
@@ -396,6 +421,7 @@ const loadData = async () => {
     } catch (e) { console.warn('Error obteniendo productos del menú', menu.id_menu) }
   }
   productosEnMenusActivos.value = Array.from(productosEnMenuIds)
+  console.log('DEBUG - Productos en menús activos:', productosEnMenusActivos.value)
 
   categorias.value = [{ id_categoria: 0, nombre_cat: 'Todos' }, ...(catRes.datos || [])]
   
@@ -410,6 +436,7 @@ const loadData = async () => {
 
   clientes.value = cliRes.datos || []
   
+  // Cargar paquetes y promociones
   await Promise.all([loadPaquetes(), loadPromociones()])
   
   isLoading.value = false
@@ -419,6 +446,8 @@ const loadPaquetes = async () => {
   paquetesLoading.value = true
   try {
     const res = await fetchConToken('/paquetes/menu-completo')
+    console.log('📦 [DEBUG] Paquetes response:', JSON.stringify(res, null, 2))
+    // Formatear datos del paquete - ajustar campos según respuesta real
     if (res.datos && res.datos.length > 0) {
       paquetes.value = res.datos.map((p: any) => ({
         id_paquete: p.id_paquete,
@@ -445,6 +474,7 @@ const loadPaquetes = async () => {
 }
 
 const loadPromociones = async () => {
+  console.log('=== loadPromociones START ===')
   try {
     const [promosRes, prodPromosRes, paqPromosRes, cliPromosRes] = await Promise.all([
       fetchConToken('/promociones/mostrar'),
@@ -453,7 +483,15 @@ const loadPromociones = async () => {
       fetchConToken('/promociones/clientes/mostrar')
     ])
     
+    console.log('DEBUG loadPromociones - promosRes:', JSON.stringify(promosRes))
+    console.log('DEBUG loadPromociones - prodPromosRes:', JSON.stringify(prodPromosRes))
+    console.log('DEBUG loadPromociones - cliPromosRes:', JSON.stringify(cliPromosRes))
+    
     if (promosRes.datos && promosRes.datos.length > 0) {
+      console.log('📦 DEBUG - Promociones raw:', JSON.stringify(promosRes.datos))
+      console.log('📦 DEBUG - Promociones keys:', Object.keys(promosRes.datos[0]))
+      
+      // Map productos, paquetes y clientes por promoción
       const productosPorPromo = new Map<number, number[]>()
       const paquetesPorPromo = new Map<number, number[]>()
       const clientesPorPromo = new Map<number, number[]>()
@@ -526,7 +564,10 @@ const loadPromociones = async () => {
         }
       })
       
+      console.log('DEBUG mapped promos:', JSON.stringify(mapped))
       promociones.value = mapped
+    } else {
+      console.log('DEBUG - No hay datos en promosRes.datos:', promosRes)
     }
   } catch (e) { 
     console.error('Promociones no disponibles', e) 
@@ -537,7 +578,7 @@ onMounted(() => {
   const ticketCargado = loadTicket()
   loadData().then(() => {
     if (ticketCargado && cart.value.length > 0) {
-      displayToast('Ticket restaurado', 'success')
+      displayToast('Ticket restored', 'success')
     }
   })
 })
@@ -559,6 +600,7 @@ onUnmounted(() => {
 // ── COMPUTADOS ─────────────────────────────────────────
 const filteredProducts = computed(() => {
   return allProducts.value.filter(p => {
+    // Solo mostrar productos que están en menús activos ahora Y están disponibles
     const enMenuActivo = productosEnMenusActivos.value.includes(p.id_producto)
     const isDisponible = p.disponibilidad !== false
     const matchCat = activeCategory.value === 'Todos' || p.categoria === activeCategory.value
@@ -582,34 +624,69 @@ const activePromociones = computed(() => {
   const diasMap: Record<number, string> = { 0: 'domingo', 1: 'lunes', 2: 'martes', 3: 'miercoles', 4: 'jueves', 5: 'viernes', 6: 'sabado' }
   const diaActual = diasMap[diaSemana] || 'desconocido'
   
+  console.log('DEBUG activePromociones - Cliente seleccionado:', selectedClient.value ? selectedClient.value.nombre : 'Público', 'ID:', selectedClient.value?.id_cliente)
+  console.log('DEBUG activePromociones - Todas las promos:', promociones.value.map(p => ({ 
+    nombre: p.nombre, 
+    activo: p.activo, 
+    solo_clientes: p.solo_clientes, 
+    clientes: p.clientes,
+    clientesLength: p.clientes?.length,
+    hora_inicio: p.hora_inicio,
+    hora_fin: p.hora_fin,
+    dias_aplicables: p.dias_aplicables
+  })))
+  
   return promociones.value.filter(p => {
-    if (p.activo === false) { return false }
+    // Solo activas
+    if (p.activo === false) {
+      console.log('DEBUG - Promo excluded: no activa', p.nombre)
+      return false
+    }
     
+    // Si tiene clientes específicos, verificar que el cliente seleccionado esté en la lista
     if (p.clientes && p.clientes.length > 0) {
-      if (!selectedClient.value) return false
-      if (!p.clientes.includes(selectedClient.value.id_cliente)) return false
+      console.log('DEBUG - Promo tiene clientes específicos:', p.nombre, 'clientes:', p.clientes, 'selectedClient ID:', selectedClient.value?.id_cliente)
+      if (!selectedClient.value) {
+        console.log('DEBUG - Promo excluded: cliente específico pero nadie seleccionado', p.nombre)
+        return false
+      }
+      if (!p.clientes.includes(selectedClient.value.id_cliente)) {
+        console.log('DEBUG - Promo excluded: cliente no está en lista específica', p.nombre)
+        return false
+      }
     }
     
+    // Si solo es para clientes registrados (no específicos)
     if (p.solo_clientes && (!p.clientes || p.clientes.length === 0)) {
-      if (!selectedClient.value) return false
+      console.log('DEBUG - Promo solo_clientes sin clientes específicos:', p.nombre, 'solo_clientes:', p.solo_clientes)
+      if (!selectedClient.value) {
+        console.log('DEBUG - Promo excluded: solo clientes pero nadie seleccionado', p.nombre)
+        return false
+      }
     }
     
+    // Verificar horario
     if (p.hora_inicio && p.hora_fin) {
       const horaInicio = (p.hora_inicio || '').toString().split(':')
       const horaFin = (p.hora_fin || '').toString().split(':')
       const minutosInicio = parseInt(horaInicio[0] || '0') * 60 + parseInt(horaInicio[1] || '0')
       const minutosFin = parseInt(horaFin[0] || '0') * 60 + parseInt(horaFin[1] || '0')
       if (horaActual < minutosInicio || horaActual >= minutosFin) {
+        console.log('DEBUG - Promo excluded: fuera de horario', p.nombre, horaActual, minutosInicio, minutosFin)
         return false
       }
     }
     
+    // Verificar días - normalizar a minúsculas
     if (p.dias_aplicables && Array.isArray(p.dias_aplicables) && p.dias_aplicables.length > 0) {
       const diasLower = p.dias_aplicables.map((d: string) => d.toLowerCase().replace(/á/g,'a').replace(/é/g,'e').replace(/í/g,'i').replace(/ó/g,'o').replace(/ú/g,'u'))
       if (!diasLower.includes(diaActual)) {
+        console.log('DEBUG - Promo excluded: día no aplica', p.nombre, 'diaActual:', diaActual, 'dias:', diasLower)
         return false
       }
     }
+    
+    console.log('DEBUG - Promo included:', p.nombre)
     return true
   })
 })
@@ -641,7 +718,6 @@ interface CartDisplayItem {
   promoGroupName?: string
   isPromoItem?: boolean
   isFree?: boolean
-  promoId?: number
   packageProductModifiers?: Record<number, IngredienteOpcion[]>
 }
 
@@ -689,7 +765,7 @@ const cartDisplay = computed((): CartDisplayEntry[] => {
   return result
 })
 
-// Descuentos
+// Descuentos - el precio ya incluye IVA, calculamos la base sin IVA
 const subtotalConIva = computed(() => 
   cart.value.reduce((acc, item) => acc + item.qty * item.unitTotal, 0)
 )
@@ -698,11 +774,13 @@ const subtotalSinIva = computed(() => subtotalConIva.value / 1.16)
 
 const totalDescuentos = computed(() => {
   let totalDesc = 0
+
   for (const promo of appliedPromociones.value) {
     if (promo.tipo === 'monto') {
       totalDesc += promo.valor
     }
   }
+
   return totalDesc
 })
 
@@ -714,6 +792,7 @@ const total = computed(() => (subtotalSinIva.value - totalDescuentos.value) * 1.
 const handleProductClick = async (product: Producto) => {
   isLoadingOptions.value = true
   const res = await fetchConToken(`/productos/producto-ingrediente/mostrar-especifico/${product.id_producto}`)
+  console.log('🍔 [DEBUG] Ingredientes response for product', product.id_producto, ':', JSON.stringify(res, null, 2))
   
   const todasOpciones = (res.datos || []).map((i: any) => ({
     ...i,
@@ -744,7 +823,7 @@ const confirmOptionsAndAddToCart = () => {
     displayToast(`Items seleccionados ${promoItemsWithModifiers.value.length}/${maxItems}`, 'success')
     isPromoContext.value = false
     promoContextProduct.value = null
-
+    
     showOptionsModal.value = false
     selectedProductForOptions.value = null
     currentOptions.value = []
@@ -767,6 +846,21 @@ const confirmOptionsAndAddToCart = () => {
     selectedProductForOptions.value = null
     currentOptions.value = []
   }
+}
+
+const closeOptionsModal = () => {
+  if (pendingPackageContext) {
+    packageProductModifiers.value = {}
+    currentPendingPackageSelections.value = []
+    pendingPackageContext = null
+    displayToast('Paquete cancelado', 'warning')
+  }
+  showOptionsModal.value = false
+  selectedProductForOptions.value = null
+  currentOptions.value = []
+  editingCartItemId.value = null
+  isPromoContext.value = false
+  promoContextProduct.value = null
 }
 
 const isEditingCartItem = computed(() => editingCartItemId.value !== null)
@@ -797,6 +891,7 @@ const addDirectlyToCart = (product: Producto, modifiers: IngredienteOpcion[], ov
       categoria: product.categoria
     })
   }
+  console.log('🛒 Cart actual:', JSON.stringify(cart.value.map(i => ({ name: i.name, categoria: i.categoria }))))
   playSound('added')
   displayToast(`${product.nombre_producto} agregado`, 'success')
 }
@@ -873,93 +968,6 @@ const togglePackageProduct = (grupoId: number, producto: PaqueteProducto) => {
   
   packageSelections.value.set(grupoId, [...current])
   packageValidationError.value = ''
-}
-
-const togglePromoPaquet = async (paquete: any) => {
-  if (promoItemsWithModifiers.value.length >= 1) {
-    displayToast('Máximo 1 paquete para descuento gratis', 'warning')
-    return
-  }
-
-  const grupos = paquete.grupos || []
-  if (grupos.length > 0) {
-    packageSelections.value = new Map()
-    packageValidationError.value = ''
-    selectedPackage.value = { ...paquete, grupos }
-    isPromoPaqueteContext.value = true
-    promoContextPaquete.value = paquete
-    
-    showPromoModal.value = false 
-    showPackageModal.value = true
-  } else {
-    // Si el paquete NO tiene grupos
-    if (selectedPromo.value?.tipo === 'descuento_fijo') {
-      const promoGroupId = Date.now()
-      cart.value.push({
-        cartId: promoGroupId,
-        productId: paquete.id_paquete || paquete.id,
-        name: paquete.nombre_paquete || paquete.paquete || paquete.nombre,
-        qty: 1,
-        basePrice: paquete.precio,
-        modifiers: [],
-        unitTotal: 0, // GRATIS
-        isPackage: true,
-        packageId: paquete.id_paquete || paquete.id,
-        packageSelections: [],
-        extraPrice: 0,
-        packageProductModifiers: {},
-        categoria: 'Paquete',
-        promoGroupId: promoGroupId,
-        promoGroupName: selectedPromo.value!.nombre,
-        isPromoItem: true,
-        promoId: selectedPromo.value!.id_promocion
-      });
-      appliedPromociones.value.push({
-        id_promocion: selectedPromo.value!.id_promocion,
-        nombre: selectedPromo.value!.nombre,
-        tipo: selectedPromo.value!.tipo,
-        valor: selectedPromo.value!.valor
-      });
-      playSound('added');
-      displayToast(`Paquete seleccionado agregado gratis`, 'success');
-      showPromoModal.value = false;
-      selectedPromo.value = null;
-    } else {
-      promoItemsWithModifiers.value.push({ product: { id_producto: paquete.id_paquete || paquete.id, nombre_producto: paquete.nombre_paquete, precio_base: paquete.precio, categoria: 'Paquete', url_imagen: '' }, modifiers: [] })
-      displayToast(`Paquete seleccionado (sin opciones)`, 'success')
-      showPromoModal.value = false
-    }
-  }
-}
-
-// Nueva función para limpiar bien la promo si cancelan el paquete
-const closePackageModal = () => {
-  showPackageModal.value = false;
-  if (isPromoPaqueteContext.value) {
-    isPromoPaqueteContext.value = false;
-    promoContextPaquete.value = null;
-    selectedPromo.value = null;
-  }
-}
-
-const closeOptionsModal = () => {
-  if (pendingPackageContext) {
-    packageProductModifiers.value = {}
-    currentPendingPackageSelections.value = []
-    pendingPackageContext = null
-    displayToast('Paquete cancelado', 'warning')
-  }
-  showOptionsModal.value = false
-  selectedProductForOptions.value = null
-  currentOptions.value = []
-  editingCartItemId.value = null
-  
-  // Limpiar estado de la promo si cancelan el producto
-  if (isPromoContext.value) {
-    isPromoContext.value = false
-    promoContextProduct.value = null
-    selectedPromo.value = null 
-  }
 }
 
 const isProductSelected = (grupoId: number, productoId: number) => {
@@ -1073,7 +1081,7 @@ const finalizePackageAdd = () => {
     qty: 1,
     basePrice: selectedPackage.value.precio,
     modifiers: [],
-    unitTotal: isPromoPaqueteContext.value ? 0 : finalPrice, // <- GRATIS 
+    unitTotal: isPromoPaqueteContext.value ? 0 : finalPrice,
     isPackage: true,
     packageId: selectedPackage.value.id_paquete,
     packageSelections: selections,
@@ -1087,14 +1095,7 @@ const finalizePackageAdd = () => {
       ...cartItemBase,
       promoGroupId,
       promoGroupName: selectedPromo.value?.nombre || 'Descuento Fijo',
-      isPromoItem: true,
-      promoId: selectedPromo.value?.id_promocion
-    })
-    appliedPromociones.value.push({
-      id_promocion: selectedPromo.value!.id_promocion,
-      nombre: selectedPromo.value!.nombre,
-      tipo: selectedPromo.value!.tipo,
-      valor: selectedPromo.value!.valor
+      isPromoItem: true
     })
   } else {
     cart.value.push(cartItemBase)
@@ -1104,13 +1105,9 @@ const finalizePackageAdd = () => {
   displayToast(`${selectedPackage.value.nombre_paquete} agregado`, 'success')
   packageProductModifiers.value = {}
   currentPendingPackageSelections.value = []
-  
-  if (isPromoPaqueteContext.value) {
-    isPromoPaqueteContext.value = false
-    promoContextPaquete.value = null
-    selectedPromo.value = null
-    showPromoModal.value = false
-  }
+  isPromoPaqueteContext.value = false
+  promoContextPaquete.value = null
+  showPromoModal.value = false
 }
 
 // ── RFID ────────────────────────────────────────────────
@@ -1126,9 +1123,11 @@ const toggleRfidListening = async () => {
     displayToast('Escuchando RFID...', 'warning')
 
     socket = connect()
+    console.log('[RFID] Socket connecting, id:', socket?.id)
 
     socket.off('rfid_detectado')
     socket.on('rfid_detectado', (data: { uid: string; status?: string; cliente?: { id_cliente: number; nombre: string }; beneficios?: any[]; mensaje?: string }) => {
+      console.log('[RFID] Evento recibido:', JSON.stringify(data))
       rfidSocketData = data
       rfidInput.value = data.uid
       rfidListening.value = false
@@ -1136,8 +1135,13 @@ const toggleRfidListening = async () => {
       handleRfidInput()
     })
 
-    socket.on('connect', () => { })
-    socket.on('disconnect', () => { })
+    socket.on('connect', () => {
+      console.log('[RFID] Socket connected:', socket?.id)
+    })
+
+    socket.on('disconnect', () => {
+      console.log('[RFID] Socket disconnected')
+    })
   } else {
     if (socket) {
       socket.off('rfid_detectado')
@@ -1156,7 +1160,9 @@ const handleRfidInput = async () => {
   rfidError.value = ''
   playSound('beep')
 
+  // Si viene data del socket, ya tiene todo - no hacer segundo request
   if (rfidSocketData) {
+    // Cliente identificado correctamente
     if (rfidSocketData.cliente) {
       rfidDetectedClient.value = {
         id_cliente: rfidSocketData.cliente.id_cliente,
@@ -1170,6 +1176,7 @@ const handleRfidInput = async () => {
       return
     }
 
+    // Errores del socket
     if (rfidSocketData.status === 'no_registrado') {
       rfidError.value = 'Tarjeta no vinculada a ningún cliente'
       displayToast('Cliente no encontrado', 'error')
@@ -1188,9 +1195,11 @@ const handleRfidInput = async () => {
       return
     }
 
+    // Si tiene status pero no cliente ni error, continuar al fallback manual
     rfidSocketData = null
   }
 
+  // Solo para entrada manual (tecleado), llamar API
   displayToast('Buscando cliente...', 'warning')
   const res = await fetchConToken(`/iot/rfid/${code}`)
 
@@ -1232,6 +1241,9 @@ const applyClientPromotions = () => {
     appliedPromociones.value = []
     return
   }
+  
+  // Aplicar promociones que tenga el cliente linked
+  // Por ahora vacío - cuando endpoint esté disponible
   appliedPromociones.value = []
 }
 
@@ -1250,60 +1262,41 @@ const confirmRfidClient = () => {
 
 // ── MODAL DE PROMOCIÓN ─────────────────────────────────────
 const openPromoModal = async (promo: Promocion) => {
-  selectedPromo.value = promo
-  promoSelectedProducts.value = {}
-  promoItemsWithModifiers.value = []
-  promoPaquetes.value = []
-  promoProductos.value = []
+  selectedPromo.value = promo
+  promoSelectedProducts.value = {}
+  promoItemsWithModifiers.value = []
 
-  console.log('DEBUG openPromoModal:', {
-    nombre: promo.nombre,
-    tipo: promo.tipo,
-    categoria: promo.categoria,
-    paquetes: promo.paquetes,
-    productos: promo.productos,
-    productosLength: promo.productos?.length
-  })
-
-  const isDescFijoPaquete = promo.tipo === 'descuento_fijo' && Array.isArray(promo.paquetes) && promo.paquetes.length > 0
+const isDescFijoPaquete = promo.tipo === 'descuento_fijo' && Array.isArray(promo.paquetes) && promo.paquetes.length > 0
   const isDescFijoProducto = promo.tipo === 'descuento_fijo' && !isDescFijoPaquete && !!promo.categoria && promo.categoria !== ''
-  const isDescFijoConProductos = promo.tipo === 'descuento_fijo' && !isDescFijoPaquete && !isDescFijoProducto && Array.isArray(promo.productos) && promo.productos.length > 0
 
-  console.log('DEBUG flags:', { isDescFijoPaquete, isDescFijoProducto, isDescFijoConProductos })
+  if (isDescFijoProducto) {
+    promoProductos.value = allProducts.value.filter(p =>
+      p.categoria === promo.categoria &&
+      p.disponibilidad !== false &&
+      productosEnMenusActivos.value.includes(p.id_producto)
+    )
+  } else if (isDescFijoPaquete) {
+    promoProductos.value = []
+    promoPaquetes.value = paquetes.value.filter((p: any) =>
+      (promo.paquetes || []).includes(p.id_paquete || p.id)
+    )
+  } else {
+    const promoProds = promo.productos || []
+    if (promoProds.length > 0) {
+      promoProductos.value = allProducts.value.filter(p =>
+        promoProds.includes(p.id_producto) &&
+        p.disponibilidad !== false &&
+        productosEnMenusActivos.value.includes(p.id_producto)
+      )
+    } else {
+      promoProductos.value = allProducts.value.filter(p =>
+        p.disponibilidad !== false &&
+        productosEnMenusActivos.value.includes(p.id_producto)
+      )
+    }
+  }
 
-  if (isDescFijoPaquete) {
-    promoPaquetes.value = paquetes.value.filter(p =>
-      (promo.paquetes || []).includes(p.id_paquete)
-    )
-  } else if (isDescFijoProducto) {
-    promoProductos.value = allProducts.value.filter(p =>
-      p.categoria === promo.categoria &&
-      p.disponibilidad !== false &&
-      productosEnMenusActivos.value.includes(p.id_producto)
-    )
-  } else if (isDescFijoConProductos) {
-    promoProductos.value = allProducts.value.filter(p =>
-      (promo.productos || []).includes(p.id_producto) &&
-      p.disponibilidad !== false &&
-      productosEnMenusActivos.value.includes(p.id_producto)
-    )
-  } else {
-    const promoProds = promo.productos || []
-    if (promoProds.length > 0) {
-      promoProductos.value = allProducts.value.filter(p =>
-        promoProds.includes(p.id_producto) &&
-        p.disponibilidad !== false &&
-        productosEnMenusActivos.value.includes(p.id_producto)
-      )
-    } else {
-      promoProductos.value = allProducts.value.filter(p =>
-        p.disponibilidad !== false &&
-        productosEnMenusActivos.value.includes(p.id_producto)
-      )
-    }
-  }
-
-  showPromoModal.value = true
+  showPromoModal.value = true
 }
 
 const openPromoProductOptions = async (product: Producto) => {
@@ -1346,13 +1339,32 @@ const openPromoProductOptions = async (product: Producto) => {
 }
 
 const togglePromoProduct = (productId: number) => {
-  const producto = promoProductos.value.find(p => p.id_producto === productId) || allProducts.value.find(p => p.id_producto === productId)
+  const producto = promoProductos.value.find(p => p.id_producto === productId)
   if (!producto) return
 
   openPromoProductOptions(producto)
 }
 
+const togglePromoPaquet = async (paquete: any) => {
+  if (promoItemsWithModifiers.value.length >= 1) {
+    displayToast('Máximo 1 paquete para descuento gratis', 'warning')
+    return
+  }
 
+  const grupos = paquete.grupos || []
+  if (grupos.length > 0) {
+    packageSelections.value = new Map()
+    packageValidationError.value = ''
+    selectedPackage.value = { ...paquete, grupos }
+    isPromoPaqueteContext.value = true
+    promoContextPaquete.value = paquete
+    showPackageModal.value = true
+  } else {
+    promoItemsWithModifiers.value.push({ product: { id_producto: paquete.id_paquete || paquete.id, nombre_producto: paquete.nombre_paquete, precio_base: paquete.precio, categoria: 'Paquete', url_imagen: '' }, modifiers: [] })
+    displayToast(`Paquete seleccionado (sin opciones)`, 'success')
+    showPromoModal.value = false
+  }
+}
 
 const confirmPromoSelection = () => {
   if (!selectedPromo.value) return
@@ -1391,8 +1403,7 @@ const confirmPromoSelection = () => {
       categoria: item0.product.categoria,
       promoGroupId: promoGroupId,
       promoGroupName: promoGroupName,
-      isPromoItem: true,
-      promoId: promo.id_promocion
+      isPromoItem: true
     }
     promoCartItems.push(item1)
 
@@ -1409,8 +1420,7 @@ const confirmPromoSelection = () => {
         categoria: item1.product.categoria,
         promoGroupId: promoGroupId,
         promoGroupName: promoGroupName,
-        isPromoItem: true,
-        promoId: promo.id_promocion
+        isPromoItem: true
       }
       promoCartItems.push(item2)
     }
@@ -1420,6 +1430,7 @@ const confirmPromoSelection = () => {
     }
     playSound('added')
   } else if (promo.tipo === 'descuento_fijo') {
+    // descuento_fijo: solo 1 producto gratis (unitTotal = 0)
     if (promoItemsWithModifiers.value.length > 1) {
       displayToast('Máximo 1 producto para descuento gratis', 'warning')
       return
@@ -1433,12 +1444,11 @@ const confirmPromoSelection = () => {
       qty: 1,
       basePrice: item0.product.precio_base,
       modifiers: item0.modifiers,
-      unitTotal: 0,
+      unitTotal: 0, // gratis
       categoria: item0.product.categoria,
       promoGroupId: promoGroupId,
       promoGroupName: promo.nombre,
-      isPromoItem: true,
-      promoId: promo.id_promocion
+      isPromoItem: true
     }
     cart.value.push(cartItem)
     playSound('added')
@@ -1467,8 +1477,7 @@ const confirmPromoSelection = () => {
         categoria: item.product.categoria,
         promoGroupId: promoGroupId,
         promoGroupName: promo.nombre,
-        isPromoItem: true,
-        promoId: promo.id_promocion
+        isPromoItem: true
       }
       cart.value.push(cartItem)
     }
@@ -1577,8 +1586,10 @@ const processPay = async () => {
     }
 
     const idOrden = ordenRes.id_orden
+    console.log('📤 [DEBUG] Orden creada:', { numeroOrden, idOrden })
 
     for (const item of cart.value) {
+      console.log('📤 [DEBUG] Agregando detalle:', { item: item.name, qty: item.qty, price: item.unitTotal })
 
       let precioSinIva = Math.round((item.unitTotal / 1.16) * 100) / 100
       if (precioSinIva === 0) precioSinIva = 0.01
@@ -1593,11 +1604,13 @@ const processPay = async () => {
           id_producto: item.isPackage ? null : item.productId,
           id_paquete: item.isPackage ? item.packageId : null,
           descuento: 0,
-          id_promocion: item.promoId || null,
+          id_promocion: null,
           id_zona: null,
           notas: itemNotes.value[item.cartId] || null
         })
       })
+
+      console.log('📥 [DEBUG] Detalle response:', detalleRes)
 
       if (detalleRes.status !== 'ok') {
         throw new Error(detalleRes.mensaje || 'Error al agregar item')
@@ -1606,7 +1619,9 @@ const processPay = async () => {
       const idDetalle = detalleRes.id_orden_detalle
 
       if (item.modifiers && item.modifiers.length > 0) {
+        console.log('📤 [DEBUG] Agregando modificadores para item:', item.name)
         for (const mod of item.modifiers) {
+          console.log('   ➡️ Modificador:', { id_ingrediente: mod.id_ingrediente, nombre: mod.nombre_ingrediente, precio: mod.precio_modificador })
           const modRes = await fetchConToken('/ordenes/detalles-modificadores/', {
             method: 'POST',
             body: JSON.stringify({
@@ -1616,13 +1631,17 @@ const processPay = async () => {
               precio: mod.precio_modificador || 0
             })
           })
+          console.log('   📥 Modificador response:', modRes)
         }
       }
 
       if (item.isPackage && item.packageSelections && item.packageSelections.length > 0) {
+        console.log('📤 [DEBUG] Agregando selections de paquete:', item.packageSelections)
         const packageMods = item.packageProductModifiers || {}
         
         for (const sel of item.packageSelections) {
+          console.log('   ➡️ Selección paquete:', { nombre: sel.nombre, id_grupo: sel.id_grupo, id_producto: sel.id_producto })
+          
           const selRes = await fetchConToken('/ordenes/paquete-seleccion/agregar', {
             method: 'POST',
             body: JSON.stringify({
@@ -1633,6 +1652,8 @@ const processPay = async () => {
             })
           })
 
+          console.log('   📥 Selección response:', selRes)
+
           if (selRes.status !== 'ok') {
             throw new Error(selRes.mensaje || 'Error al agregar selección de paquete')
           }
@@ -1641,6 +1662,7 @@ const processPay = async () => {
 
           const modsProducto = packageMods[sel.id_producto] || []
           if (modsProducto.length > 0) {
+            console.log('   📤 [DEBUG] Modificadores de selección:', modsProducto.map(m => m.nombre_ingrediente))
             for (const mod of modsProducto) {
               const modSelRes = await fetchConToken('/ordenes/detalles-modificadores/', {
                 method: 'POST',
@@ -1651,23 +1673,26 @@ const processPay = async () => {
                   precio: mod.precio_modificador || 0
                 })
               })
+              console.log('   📥 Modificador selección response:', modSelRes)
             }
           }
         }
       }
     }
-    
-    const montoFinal = total.value <= 0 ? 0.01 : total.value
 
+    console.log('📤 [DEBUG] Registrando pago:', { id_orden: idOrden, metodo: selectedPayment.value, monto: total.value })
+    
     const pagoRes = await fetchConToken('/ordenes/pagos/agregar', {
       method: 'POST',
       body: JSON.stringify({
         id_orden: idOrden,
         metodo: selectedPayment.value,
-        monto: montoFinal,
+        monto: total.value,
         referencia: null
       })
     })
+
+    console.log('📥 [DEBUG] Pago response:', pagoRes)
 
     if (pagoRes.status !== 'ok') {
       throw new Error(pagoRes.mensaje || 'Error al registrar el pago')
@@ -1704,6 +1729,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 
 <template>
   <div class="venta-layout">
+    <!-- HEADER -->
     <header class="venta-header">
       <div class="header-left">
         <h1 class="venta-title">Terminal POS</h1>
@@ -1751,7 +1777,9 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
       </div>
     </header>
 
+    <!-- MAIN -->
     <div class="venta-main">
+      <!-- LEFT PANEL: Products -->
       <section class="panel panel--products">
         <div class="products-top">
           <div class="search-bar">
@@ -1763,6 +1791,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           </div>
         </div>
 
+        <!-- Tabs -->
         <div class="view-tabs">
           <button 
             class="view-tab" 
@@ -1781,6 +1810,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           >Promociones</button>
         </div>
 
+        <!-- Categories -->
         <div v-if="activeView === 'products'" class="categories-bar">
           <div class="categories-scroll">
             <button
@@ -1793,6 +1823,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           </div>
         </div>
 
+        <!-- Products Grid -->
         <div v-if="isLoading" class="loading-state">Cargando...</div>
         
         <div v-else-if="activeView === 'products'" class="product-grid">
@@ -1811,6 +1842,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           <div v-if="filteredProducts.length === 0" class="empty-state">No se encontraron productos</div>
         </div>
 
+        <!-- Paquetes Grid -->
         <div v-else-if="activeView === 'paquetes'" class="product-grid">
           <div v-if="paquetesLoading" class="loading-state">Cargando paquetes...</div>
           <div v-else-if="activePaquetes.length === 0" class="empty-state">No hay paquetes disponibles</div>
@@ -1826,6 +1858,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           </button>
         </div>
 
+        <!-- Promociones Grid -->
         <div v-else-if="activeView === 'promos'" class="product-grid">
           <div v-if="activePromociones.length === 0" class="empty-state">No hay promociones activas</div>
           <div 
@@ -1844,6 +1877,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         </div>
       </section>
 
+      <!-- RIGHT PANEL: Cart -->
       <section class="panel panel--cart">
         <div class="panel-header">
           <span class="panel-title">Ticket de Venta</span>
@@ -1852,6 +1886,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           </button>
         </div>
 
+        <!-- Beneficios aplicados -->
         <div v-if="appliedPromociones.length > 0" class="applied-promos">
           <div v-for="promo in appliedPromociones" :key="promo.id_promocion" class="promo-applied-tag">
             {{ promo.nombre }}
@@ -1867,6 +1902,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           </div>
 
           <template v-for="entry in cartDisplay" :key="entry.type === 'group' ? entry.promoGroupId : entry.item.cartId">
+            <!-- Grupo de promoción (recuadro) -->
             <div v-if="entry.type === 'group'" class="promo-group-box">
               <div class="promo-group-header">
                 <span class="promo-group-badge">{{ entry.promoGroupName }}</span>
@@ -1881,24 +1917,12 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
                   <span class="item-unit" :class="{ 'price-free': item.isFree }">
                     {{ item.isFree ? '$0.00' : '$' + item.unitTotal.toFixed(2) }}
                   </span>
-                  
                   <ul v-if="item.modifiers.length > 0" class="item-mods-list">
                     <li v-for="mod in item.modifiers" :key="mod.id_ingrediente">
                       + {{ mod.nombre_ingrediente }} <span v-if="mod.precio_modificador > 0">(+${{mod.precio_modificador}})</span>
                     </li>
                   </ul>
-                  
-                  <div v-if="item.packageSelections?.length" class="package-selections">
-                    <span v-for="sel in item.packageSelections" :key="sel.id_producto" class="sel-chip">
-                      {{ sel.nombre }}
-                      <template v-if="item.packageProductModifiers">
-                        <span v-for="mod in (item.packageProductModifiers[sel.id_producto] || [])" :key="mod.id_ingrediente" class="sel-mod">
-                          + {{ mod.nombre_ingrediente }}
-                        </span>
-                      </template>
-                    </span>
-                  </div>
-                  </div>
+                </div>
                 <div class="qty-controls">
                   <button @click="updateQty(item.cartId, -1)">−</button>
                   <span>{{ item.qty }}</span>
@@ -1912,6 +1936,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
               </div>
             </div>
 
+            <!-- Item individual -->
             <div v-else class="cart-item">
               <div class="item-info">
                 <span class="item-name">
@@ -1929,7 +1954,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
                     {{ sel.nombre }}
                     <template v-if="entry.item.packageProductModifiers">
                       <span v-for="mod in (entry.item.packageProductModifiers[sel.id_producto] || [])" :key="mod.id_ingrediente" class="sel-mod">
-                        + {{ mod.nombre_ingrediente }}
+                        {{ mod.nombre_ingrediente }}
                       </span>
                     </template>
                   </span>
@@ -1986,6 +2011,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
       </section>
     </div>
 
+    <!-- MODAL: Options -->
     <div v-if="showOptionsModal && selectedProductForOptions" class="modal-overlay" @click.self="showOptionsModal = false">
       <div class="modal-content options-modal">
         <div class="modal-header">
@@ -2014,7 +2040,8 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
       </div>
     </div>
 
-    <div v-if="showPackageModal && selectedPackage" class="modal-overlay" @click.self="closePackageModal">
+    <!-- MODAL: Package -->
+    <div v-if="showPackageModal && selectedPackage" class="modal-overlay" @click.self="showPackageModal = false">
       <div class="modal-content package-modal">
         <div class="modal-header">
           <h3>{{ selectedPackage.nombre_paquete }}</h3>
@@ -2044,12 +2071,13 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           <p v-if="packageExtraPrice > 0" class="extra-price">Extras: +${{ packageExtraPrice.toFixed(2) }}</p>
         </div>
         <div class="modal-actions">
-          <button class="btn btn--secondary" @click="closePackageModal">Cancelar</button>
+          <button class="btn btn--secondary" @click="showPackageModal = false">Cancelar</button>
           <button class="btn btn--primary" @click="addPackageToCart">Agregar Paquete</button>
         </div>
       </div>
     </div>
 
+    <!-- MODAL: Promo -->
     <div v-if="showPromoModal && selectedPromo" class="modal-overlay" @click.self="showPromoModal = false">
       <div class="modal-content promo-modal">
         <div class="modal-header">
@@ -2061,6 +2089,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           <p class="promo-limit">Items seleccionados {{ totalPromoSeleccionados }}/{{ selectedPromo.tipo === 'descuento_fijo' ? 1 : 2 }}</p>
         </div>
 
+        <!-- Items seleccionados -->
         <div v-if="promoItemsWithModifiers.length > 0" class="promo-selected-items">
           <div v-for="(item, idx) in promoItemsWithModifiers" :key="idx" class="selected-item-card">
             <div class="selected-item-info">
@@ -2100,7 +2129,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
           </div>
           <div
             v-for="paq in promoPaquetes"
-            :key="paq.id_paquete"
+            :key="paq.id_paquete || paq.id"
             class="promo-product-item"
             :class="{ disabled: promoItemsWithModifiers.length >= 1 }"
             @click="togglePromoPaquet(paq)"
@@ -2124,6 +2153,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
       </div>
     </div>
 
+    <!-- MODAL: Client -->
     <div v-if="showClientModal" class="modal-overlay" @click.self="showClientModal = false">
       <div class="modal-content">
         <h3>Seleccionar Cliente</h3>
@@ -2140,6 +2170,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
       </div>
     </div>
 
+    <!-- MODAL: RFID Client Confirm -->
     <div v-if="showClientConfirmModal && rfidDetectedClient" class="modal-overlay" @click.self="showClientConfirmModal = false">
       <div class="modal-content">
         <h3>Cliente Detectado</h3>
@@ -2157,6 +2188,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
       </div>
     </div>
 
+    <!-- MODAL: Confirm -->
     <div v-if="showConfirmModal" class="modal-overlay">
       <div class="modal-content confirm-modal">
         <h3>¿Confirmar Orden?</h3>
@@ -2179,6 +2211,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
       </div>
     </div>
 
+    <!-- TOAST -->
     <div v-if="showToast" class="toast" :class="toastType">
       {{ toastMsg }}
     </div>
@@ -2253,7 +2286,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .product-card:disabled { opacity: 0.6; }
 .product-emoji { width: 56px; height: 56px; background: #f3f4f6; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 28px; }
 .product-img { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; }
-.product-name { font-size: 14px; font-weight: 600; color: #111827; text-align: center; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; width: 100%; }
+.product-name { font-size: 14px; font-weight: 600; color: #111827; text-align: center; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; width: 100%; }
 .product-price { font-size: 15px; color: #16a34a; font-weight: 700; }
 .promo-card { background: #fef3c7; border-color: #fcd34d; }
 .promo-badge { font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 6px; }
@@ -2295,8 +2328,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
 .item-promos { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; padding-left: 12px; }
 .promo-item-tag { font-size: 10px; background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-weight: 600; border: 1px solid #fcd34d; }
 .package-selections { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-.sel-chip { font-size: 10px; background: #e0e7ff; color: #4338ca; padding: 4px 8px; border-radius: 4px; display: flex; flex-direction: column; gap: 2px; line-height: 1.2; }
-.sel-mod { font-size: 9px; background: rgba(255,255,255,0.4); padding: 2px 4px; border-radius: 2px; }
+.sel-chip { font-size: 10px; background: #e0e7ff; color: #4338ca; padding: 2px 6px; border-radius: 4px; }
 
 .item-note-input { margin-top: 6px; padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 11px; width: 100%; }
 
