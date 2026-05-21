@@ -127,6 +127,16 @@ const showModal = ref(false)
 const modalType = ref<'crear' | 'editar' | 'eliminar' | 'cambiar-rol'>('crear')
 const formData = ref<Record<string, any>>({})
 const isSubmitting = ref(false)
+let toastTimeout: ReturnType<typeof setTimeout> | null = null
+const toast = ref<{ visible: boolean; message: string; type: 'success' | 'error' }>({ visible: false, message: '', type: 'success' })
+
+const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  if (toastTimeout) clearTimeout(toastTimeout)
+  toast.value = { visible: true, message, type }
+  toastTimeout = setTimeout(() => {
+    toast.value.visible = false
+  }, 3000)
+}
 
 const openModal = (type: 'crear' | 'editar' | 'eliminar' | 'cambiar-rol', user: any = null) => {
   if (!puedeAdministrar.value && type !== 'cambiar-rol') return
@@ -173,6 +183,7 @@ const handleSubmit = async () => {
       break
     case 'editar':
       endpoint = '/usuarios/actualizar'
+      method = 'PUT'
       if (!payload.nueva_contra) delete payload.nueva_contra
       if (payload.nuevo_nombre === payload.usuario_actual) delete payload.nuevo_nombre
       break
@@ -182,6 +193,7 @@ const handleSubmit = async () => {
       break
     case 'cambiar-rol':
       endpoint = '/usuarios/cambiar-rol'
+      method = 'PUT'
       break
   }
 
@@ -189,10 +201,16 @@ const handleSubmit = async () => {
   isSubmitting.value = false
 
   if (res.status === 'ok' || res.status === 200 || res.mensaje?.includes('correctamente')) {
+    const msg = modalType.value === 'crear' ? 'Usuario creado correctamente'
+      : modalType.value === 'editar' ? 'Usuario actualizado correctamente'
+      : modalType.value === 'eliminar' ? 'Usuario eliminado correctamente'
+      : modalType.value === 'cambiar-rol' ? 'Rol cambiado correctamente'
+      : 'Operación exitosa'
+    showToast(msg, 'success')
     closeModal()
     loadUsuarios()
   } else {
-    alert(`Error: ${res.mensaje || 'No se pudo procesar la solicitud'}`)
+    showToast(res.mensaje || 'No se pudo procesar la solicitud', 'error')
   }
 }
 
@@ -223,6 +241,11 @@ onMounted(() => {
 
 <template>
   <div class="menu-container">
+    <Transition name="toast">
+      <div v-if="toast.visible" :class="['toast', toast.type]">
+        {{ toast.message }}
+      </div>
+    </Transition>
     <header class="menu-header">
       <h1 class="page-title">Gestión de Usuarios y Roles</h1>
       <p class="page-subtitle">Administra usuarios, roles y permisos del sistema.</p>
@@ -533,4 +556,25 @@ onMounted(() => {
 .permiso-cell { text-align: center; }
 .permiso-checkbox { width: 18px; height: 18px; cursor: pointer; accent-color: var(--tenant-primario, #002D72); }
 .permiso-checkbox.pending-change { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3); }
+
+/* ── TOAST ── */
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: var(--font-size-sm, 13px);
+  font-weight: 500;
+  z-index: 9999;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  color: #fff;
+  pointer-events: none;
+}
+.toast.success { background: #22c55e; }
+.toast.error { background: #ef4444; }
+.toast-enter-active { transition: all 0.3s ease; }
+.toast-leave-active { transition: all 0.3s ease; }
+.toast-enter-from { opacity: 0; transform: translateX(40px); }
+.toast-leave-to { opacity: 0; transform: translateX(40px); }
 </style>

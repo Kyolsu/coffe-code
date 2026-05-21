@@ -136,7 +136,6 @@ const activeFilter = ref('activa')
 const filterOptions = [
   { label: 'Activas', value: 'activa' },
   { label: 'Pendientes', value: 'pendiente' },
-  { label: 'Preparación', value: 'en_preparacion' },
   { label: 'Listas', value: 'lista' },
   { label: 'Canceladas', value: 'cancelada' },
   { label: 'Entregadas', value: 'entregada' },

@@ -1,25 +1,175 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { API_URL } from '../config/api'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const API_BASE = `${API_URL}/api`
 
-// Nombre real desde el store
 const userName = computed(() => authStore.nombreUsuario ?? 'Usuario')
 
-// Fecha actual formateada
 const fechaActual = computed(() => {
   const opciones: Intl.DateTimeFormatOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
   return new Date().toLocaleDateString('es-MX', opciones)
 })
 
-// Funciones de navegación
+const fetchConToken = async (endpoint: string) => {
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      headers: { 'auth-token': authStore.token || '', 'Content-Type': 'application/json' }
+    })
+    return await res.json()
+  } catch { return { status: 'error', datos: [] } }
+}
+
+const fetchSinToken = async (endpoint: string) => {
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`)
+    return await res.json()
+  } catch { return { status: 'error', datos: [] } }
+}
+
+const ventasHoy = ref(0)
+const ordenesHoy = ref(0)
+const clientesTotal = ref(0)
+const ventasSemanales = ref<{ fecha: string; total: number }[]>([])
+const actividadReciente = ref<any[]>([])
+
+const getFechaLocal = (fechaISO: string | null | undefined): string => {
+  if (!fechaISO) return ''
+  const d = new Date(fechaISO)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+const formatFechaCorta = (fecha: string): string => {
+  const partes = fecha.split('-')
+  if (partes.length !== 3) return fecha
+  return `${partes[2]}/${partes[1]}`
+}
+
+const loadDashboardData = async () => {
+  const [ordenesRes, clientesRes] = await Promise.all([
+    fetchConToken('/ordenes/mostrar'),
+    fetchSinToken('/clientes/mostrar-activos')
+  ])
+
+  const hoy = new Date()
+  hoy.setHours(0, 0, 0, 0)
+  const fechaHoyStr = getFechaLocal(hoy.toISOString())
+
+  const todasOrdenes = ordenesRes.datos || []
+  const ventasDelDia = todasOrdenes.filter((o: any) => {
+    const fechaOrden = getFechaLocal(o.fecha_creacion)
+    return fechaOrden === fechaHoyStr && o.estado_orden?.toLowerCase() !== 'cancelada'
+  })
+
+  ventasHoy.value = ventasDelDia.reduce((acc: number, o: any) => acc + (Number(o.total) || 0), 0)
+  ordenesHoy.value = ventasDelDia.length
+
+  clientesTotal.value = (clientesRes.datos || []).length
+
+  const mapaSemanal = new Map<string, number>()
+  const hace7dias = new Date(hoy)
+  hace7dias.setDate(hace7dias.getDate() - 6)
+
+  todasOrdenes.forEach((o: any) => {
+    if (o.estado_orden?.toLowerCase() === 'cancelada') return
+    const fechaOrden = getFechaLocal(o.fecha_creacion)
+    if (fechaOrden >= getFechaLocal(hace7dias.toISOString())) {
+      mapaSemanal.set(fechaOrden, (mapaSemanal.get(fechaOrden) || 0) + (Number(o.total) || 0))
+    }
+  })
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(hace7dias)
+    d.setDate(d.getDate() + i)
+    const fechaStr = getFechaLocal(d.toISOString())
+    if (!mapaSemanal.has(fechaStr)) {
+      mapaSemanal.set(fechaStr, 0)
+    }
+  }
+
+  ventasSemanales.value = Array.from(mapaSemanal.entries())
+    .map(([fecha, total]) => ({ fecha, total }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha))
+
+  actividadReciente.value = todasOrdenes
+    .filter((o: any) => o.estado_orden?.toLowerCase() !== 'cancelada')
+    .sort((a: any, b: any) => new Date(b.fecha_creacion).getTime() - new Date(a.fecha_creacion).getTime())
+    .slice(0, 5)
+
+  const maxVenta = Math.max(...ventasSemanales.value.map(d => d.total), 1)
+}
+
+const formatCurrency = (value: number) => {
+  return value.toLocaleString('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 2 })
+}
+
+const formatTime = (fechaISO: string) => {
+  const d = new Date(fechaISO)
+  return d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+}
+
+const chartPoints = computed(() => {
+  const datos = ventasSemanales.value
+  if (datos.length === 0) return ''
+  const max = Math.max(...datos.map(d => d.total), 1)
+  const width = 260
+  const height = 110
+  return datos.map((d, i) => {
+    const x = (i / Math.max(datos.length - 1, 1)) * width
+    const y = height - (d.total / max) * (height - 10)
+    return `${x},${y}`
+  }).join(' ')
+})
+
+const chartArea = computed(() => {
+  const datos = ventasSemanales.value
+  if (datos.length === 0) return ''
+  const max = Math.max(...datos.map(d => d.total), 1)
+  const width = 260
+  const height = 110
+  const puntos = datos.map((d, i) => {
+    const x = (i / Math.max(datos.length - 1, 1)) * width
+    const y = height - (d.total / max) * (height - 10)
+    return `${x},${y}`
+  })
+  if (puntos.length === 0) return ''
+  const first = puntos[0]!.split(',')
+  const last = puntos[puntos.length - 1]!.split(',')
+  return `M${puntos[0]} L${puntos.join(' L')} L${last[0]},${height} L${first[0]},${height} Z`
+})
+
+const chartDots = computed(() => {
+  const datos = ventasSemanales.value
+  if (datos.length === 0) return []
+  const max = Math.max(...datos.map(d => d.total), 1)
+  const width = 260
+  const height = 110
+  return datos.map((d, i) => ({
+    x: (i / Math.max(datos.length - 1, 1)) * width,
+    y: height - (d.total / max) * (height - 10),
+    fecha: d.fecha
+  }))
+})
+
+const chartLabels = computed(() => {
+  return ventasSemanales.value.map(d => formatFechaCorta(d.fecha))
+})
+
 const irAVistaPublica = () => window.open('/menu-publico', '_blank')
 const irAVenta = () => router.push({ name: 'venta' })
 const irAClientes = () => router.push({ name: 'clientes' })
 const irAMenu = () => router.push({ name: 'menu' })
+
+onMounted(() => {
+  loadDashboardData()
+})
 </script>
 
 <template>
@@ -46,21 +196,21 @@ const irAMenu = () => router.push({ name: 'menu' })
         <div class="kpi-icon icon-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg></div>
         <div class="kpi-data">
           <span class="kpi-label">Ventas de hoy</span>
-          <span class="kpi-value">$0.00</span>
+          <span class="kpi-value">{{ formatCurrency(ventasHoy) }}</span>
         </div>
       </div>
       <div class="kpi-card">
         <div class="kpi-icon icon-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg></div>
         <div class="kpi-data">
           <span class="kpi-label">Órdenes del día</span>
-          <span class="kpi-value">0</span>
+          <span class="kpi-value">{{ ordenesHoy }}</span>
         </div>
       </div>
       <div class="kpi-card">
         <div class="kpi-icon icon-orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"></path></svg></div>
         <div class="kpi-data">
           <span class="kpi-label">Clientes</span>
-          <span class="kpi-value">0</span>
+          <span class="kpi-value">{{ clientesTotal }}</span>
         </div>
       </div>
     </section>
@@ -117,36 +267,40 @@ const irAMenu = () => router.push({ name: 'menu' })
 
     <section class="bottom-section">
       <div class="chart-container">
-        <h2 class="section-title">Resumen de Ventas de la Semana</h2>
+        <h2 class="section-title">Ventas por Día</h2>
         <div class="chart-wrapper">
-          <svg class="chart-svg" viewBox="0 0 280 110" preserveAspectRatio="none">
+          <svg class="chart-svg" viewBox="0 0 260 110" preserveAspectRatio="none">
             <defs>
               <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="var(--tenant-primario)" stop-opacity="0.3"/>
                 <stop offset="100%" stop-color="var(--tenant-primario)" stop-opacity="0"/>
               </linearGradient>
             </defs>
-            <path d="M0,88 C20,78 30,65 46,60 C62,55 72,75 93,58 C114,42 118,30 140,28 C162,26 168,50 186,42 C205,34 215,18 280,10 L280,110 L0,110 Z" fill="url(#chartGradient)"/>
-            <path d="M0,88 C20,78 30,65 46,60 C62,55 72,75 93,58 C114,42 118,30 140,28 C162,26 168,50 186,42 C205,34 215,18 280,10" fill="none" stroke="var(--tenant-primario)" stroke-width="2" stroke-linecap="round"/>
-            <circle cx="0" cy="88" r="3" fill="var(--tenant-primario)"/>
-            <circle cx="46" cy="60" r="3" fill="var(--tenant-primario)"/>
-            <circle cx="93" cy="58" r="3" fill="var(--tenant-primario)"/>
-            <circle cx="140" cy="28" r="3.5" fill="var(--tenant-primario)"/>
-            <circle cx="186" cy="42" r="3" fill="var(--tenant-primario)"/>
-            <circle cx="280" cy="10" r="3.5" fill="var(--tenant-primario)"/>
+            <path v-if="chartArea" :d="chartArea" fill="url(#chartGradient)"/>
+            <polyline v-if="chartPoints" :points="chartPoints" fill="none" stroke="var(--tenant-primario)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle v-for="(dot, i) in chartDots" :key="i" :cx="dot.x" :cy="dot.y" r="3" fill="var(--tenant-primario)"/>
           </svg>
           <div class="chart-labels">
-            <span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span>
+            <span v-for="(label, i) in chartLabels" :key="i">{{ label }}</span>
           </div>
         </div>
       </div>
 
       <div class="activity-container">
         <h2 class="section-title">Actividad Reciente</h2>
-        <div class="empty-activity">
-           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-           <p>No hay actividad registrada aún.</p>
-           <span>Las últimas ventas aparecerán aquí.</span>
+        <div v-if="actividadReciente.length > 0" class="activity-list">
+          <div v-for="item in actividadReciente" :key="item.id_orden" class="activity-item">
+            <div class="activity-info">
+              <span class="activity-ticket">{{ item.numero_orden || `#${item.id_orden}` }}</span>
+              <span class="activity-time">{{ formatTime(item.fecha_creacion) }}</span>
+            </div>
+            <span class="activity-total">{{ formatCurrency(Number(item.total) || 0) }}</span>
+          </div>
+        </div>
+        <div v-else class="empty-activity">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          <p>No hay actividad registrada aún.</p>
+          <span>Las últimas ventas aparecerán aquí.</span>
         </div>
       </div>
     </section>
@@ -238,10 +392,13 @@ const irAMenu = () => router.push({ name: 'menu' })
 .chart-labels { display: flex; justify-content: space-between; padding: 0 4px; margin-top: 8px; }
 .chart-labels span { font-size: var(--font-size-xs, 11px); color: var(--tenant-texto-muted, #6b7280); }
 
-.empty-activity { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--tenant-texto-muted, #6b7280); padding: var(--espacio-4, 16px) 0; }
-.empty-activity svg { width: 32px; height: 32px; opacity: 0.5; margin-bottom: 12px; }
-.empty-activity p { margin: 0 0 4px 0; font-size: var(--font-size-sm, 13px); font-weight: 500; color: var(--tenant-texto, #111827); }
-.empty-activity span { font-size: var(--font-size-xs, 11px); }
+/* ── ACTIVITY LIST ── */
+.activity-list { display: flex; flex-direction: column; gap: 12px; }
+.activity-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: color-mix(in srgb, var(--tenant-texto) 3%, transparent); border-radius: 8px; }
+.activity-info { display: flex; flex-direction: column; gap: 2px; }
+.activity-ticket { font-size: var(--font-size-sm, 13px); font-weight: 600; color: var(--tenant-texto, #111827); }
+.activity-time { font-size: var(--font-size-xs, 11px); color: var(--tenant-texto-muted, #6b7280); }
+.activity-total { font-size: var(--font-size-sm, 13px); font-weight: 700; color: var(--tenant-primario, #002D72); }
 
 /* ── WATERMARK ── */
 .watermark { position: absolute; bottom: var(--espacio-4, 16px); right: var(--espacio-8, 32px); text-align: right; display: flex; flex-direction: column; gap: 1px; pointer-events: none; opacity: 0.6; }

@@ -492,4 +492,27 @@ router.get('/permisos/roles/mostrar', verificarToken, async (req, res) => {
     }
 });
 
+// Endpoint cambiar rol de usuario
+router.put('/cambiar-rol', verificarToken, async (req, res) => {
+    try {
+        const { id_usuario, nuevo_rol } = req.body;
+
+        if (!id_usuario || !nuevo_rol) {
+            return res.status(400).json({ status: "error", mensaje: "Se requiere id_usuario y nuevo_rol" });
+        }
+
+        const query = 'UPDATE usuarios SET id_rol = $1 WHERE id_usuario = $2 RETURNING id_usuario';
+        const result = await db.query(query, [nuevo_rol, id_usuario]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ status: "error", mensaje: "Usuario no encontrado" });
+        }
+
+        res.json({ status: "ok", mensaje: "Rol cambiado correctamente" });
+    } catch (err) {
+        console.error("Error al cambiar rol:", err.message);
+        res.status(500).json({ status: "error", mensaje: "Error interno al cambiar el rol" });
+    }
+});
+
 module.exports = router;

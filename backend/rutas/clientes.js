@@ -65,7 +65,7 @@ router.put('/modificar/:id', verificarToken, async (req, res) => {
 //ver clientes activos
 router.get('/mostrar-activos', async (req, res) => {
     try {
-        const query = 'Select * from v_clientes_activos';
+        const query = 'SELECT * FROM clientes WHERE activo = true ORDER BY nombre';
         
         const result = await db.query(query);
         if (result.rows.length === 0) {
