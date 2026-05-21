@@ -8,14 +8,18 @@ const authStore = useAuthStore()
 
 const isCollapsed = ref(false)
 
-// Rol real desde el store — ya mapeado a string ('admin', 'caja', etc.)
+// userRole para lógicas adicionales
 const userRole = computed(() => authStore.rol)
 
-// Permisos: 1=Tomar pedidos, 2=Ver pedidos, 3=Administrar menú, 4=Administrar usuarios
-const puedeTomarPedidos = computed(() => authStore.tienePermiso(1))
-const puedeVerPedidos = computed(() => authStore.tienePermiso(2))
-const puedeAdministrarMenu = computed(() => authStore.tienePermiso(3))
-const puedeAdministrarUsuarios = computed(() => authStore.tienePermiso(4))
+// Permisos por vista: 1=dashboard, 2=venta, 3=menu, 4=ordenes, 5=cocina, 6=clientes, 7=estadisticas, 8=usuarios
+const puedeDashboard    = computed(() => authStore.tienePermiso(1))
+const puedeVenta        = computed(() => authStore.tienePermiso(2))
+const puedeMenu         = computed(() => authStore.tienePermiso(3))
+const puedeOrdenes      = computed(() => authStore.tienePermiso(4))
+const puedeCocina       = computed(() => authStore.tienePermiso(5))
+const puedeClientes     = computed(() => authStore.tienePermiso(6))
+const puedeEstadisticas = computed(() => authStore.tienePermiso(7))
+const puedeUsuarios     = computed(() => authStore.tienePermiso(8))
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
@@ -47,7 +51,7 @@ const handleLogout = () => {
     <!-- Nav -->
     <nav class="sidebar-nav">
 
-      <RouterLink to="/dashboard" class="nav-item">
+      <RouterLink v-if="puedeDashboard" to="/dashboard" class="nav-item">
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
@@ -57,7 +61,7 @@ const handleLogout = () => {
         <span v-if="!isCollapsed" class="nav-label">Inicio</span>
       </RouterLink>
 
-      <RouterLink to="/venta" class="nav-item">
+      <RouterLink v-if="puedeVenta" to="/venta" class="nav-item">
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
@@ -68,7 +72,7 @@ const handleLogout = () => {
         <span v-if="!isCollapsed" class="nav-label">Ventas</span>
       </RouterLink>
 
-      <RouterLink v-if="puedeAdministrarMenu" to="/menu" class="nav-item">
+      <RouterLink v-if="puedeMenu" to="/menu" class="nav-item">
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8zM6 2v3M10 2v3M14 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -77,7 +81,7 @@ const handleLogout = () => {
         <span v-if="!isCollapsed" class="nav-label">Inventario</span>
       </RouterLink>
 
-      <RouterLink to="/ordenes" class="nav-item">
+      <RouterLink v-if="puedeOrdenes" to="/ordenes" class="nav-item">
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -88,7 +92,7 @@ const handleLogout = () => {
       </RouterLink>
 
       <!-- KD — visible para admin, gerente y cocinero -->
-      <RouterLink to="/cocina" class="nav-item">
+      <RouterLink v-if="puedeCocina" to="/cocina" class="nav-item">
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none">
             <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/>
@@ -99,7 +103,7 @@ const handleLogout = () => {
         <span v-if="!isCollapsed" class="nav-label">Cocina (KD)</span>
       </RouterLink>
 
-      <RouterLink to="/clientes" class="nav-item">
+      <RouterLink v-if="puedeClientes" to="/clientes" class="nav-item">
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -110,7 +114,7 @@ const handleLogout = () => {
         <span v-if="!isCollapsed" class="nav-label">Clientes</span>
       </RouterLink>
 
-      <RouterLink to="/estadisticas" class="nav-item">
+      <RouterLink v-if="puedeEstadisticas" to="/estadisticas" class="nav-item">
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M18 20V10M12 20V4M6 20v-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -131,7 +135,7 @@ const handleLogout = () => {
       </a>
 
       <!-- Solo usuarios con permiso 4 (administrar usuarios) -->
-      <template v-if="puedeAdministrarUsuarios">
+      <template v-if="puedeUsuarios">
         <div v-if="!isCollapsed" class="nav-divider"></div>
 
         <RouterLink to="/usuarios" class="nav-item">

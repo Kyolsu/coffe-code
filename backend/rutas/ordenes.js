@@ -1,10 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db'); 
-const bcrypt = require('bcrypt'); //pal cifrado
-const saltRounds = 10; // Nivel de seguridad
-const jwt = require('jsonwebtoken'); //jwt tokens
+const db = require('../db');
+const bcrypt = require('bcrypt');
+const saltRounds = 10;
+const jwt = require('jsonwebtoken');
 const verificarToken = require('../middleware/auth');
+
+const CLOUD_URL = process.env.RENDER_URL || 'https://coffe-code-s7t9.onrender.com';
 
 
 router.post('/agregar', verificarToken, async (req, res) => {
@@ -47,13 +49,29 @@ router.post('/agregar', verificarToken, async (req, res) => {
         ];
 
         const result = await db.query(query, values);
-        
+
+        const nuevaOrden = {
+            numero_orden,
+            estado_orden: 'pendiente',
+            total,
+            cliente: null,
+            fecha_creacion: new Date().toISOString()
+        };
+
         res.status(201).json({
             status: "ok",
             mensaje: "Orden generada exitosamente",
             id_orden: result.rows[0].id_orden,
             numero_seguimiento: numero_orden
         });
+
+        if (process.env.NODE_ENV !== 'production') {
+            fetch(`${CLOUD_URL}/ordenes/agregar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(nuevaOrden)
+            }).catch(err => console.error('Sync error to cloud:', err.message));
+        }
 
     } catch (err) {
         console.error("Error al crear la orden:", err.message);
@@ -338,7 +356,7 @@ router.post('/pagos/agregar', verificarToken, async (req, res) => {
         const { id_orden, metodo, monto, referencia } = req.body;
         const id_usuario = req.usuario.id_usuario; 
 
-        if (!id_orden || !metodo || !monto) {
+        if (!id_orden || !metodo || monto === undefined || monto === null) {
             return res.status(400).json({ status: "error", mensaje: "Faltan datos obligatorios" });
         }
 

@@ -14,8 +14,7 @@ interface Venta {
   fecha: string
   fecha_creacion: string
   estado_orden: string
-  id_cliente: number | null
-  nombre_cliente: string | null
+  cliente: string | null
 }
 
 interface Cliente {
@@ -25,6 +24,21 @@ interface Cliente {
 
 interface StatsDia {
   fecha: string
+  total: number
+  count: number
+}
+
+interface Pago {
+  id_pago: number
+  id_orden: number
+  numero_orden: string
+  metodo_pago: string
+  monto_pagado: number
+  fecha_pago: string
+}
+
+interface MetodoPagoStats {
+  metodo: string
   total: number
   count: number
 }
@@ -101,8 +115,7 @@ const loadData = async () => {
         fecha: parseFechaLocal(o.fecha_creacion),
         fecha_creacion: o.fecha_creacion,
         estado_orden: o.estado_orden,
-        id_cliente: o.id_cliente || null,
-        nombre_cliente: o.cliente || null
+        cliente: o.cliente || null
       }))
   }
 
@@ -146,10 +159,11 @@ const ventasFiltradas = computed(() => {
     }
 
     if (filtroCliente.value === 'sin_cliente') {
-      return v.id_cliente === null
+      return v.cliente === null
     }
     if (filtroCliente.value !== 'todos') {
-      return v.id_cliente === Number(filtroCliente.value)
+      const clienteSeleccionado = clientes.value.find(c => String(c.id_cliente) === filtroCliente.value)
+      return clienteSeleccionado ? v.cliente === clienteSeleccionado.nombre : true
     }
 
     return true
@@ -192,6 +206,52 @@ const ordenesPorEstado = computed(() => {
     mapa.set(estado, (mapa.get(estado) || 0) + 1)
   })
   return Object.fromEntries(mapa)
+})
+
+// ── CORTE DE CAJA ───────────────────────
+const pagosDelDia = ref<Pago[]>([])
+const isLoadingPagos = ref(false)
+
+const loadPagosDelDia = async () => {
+  isLoadingPagos.value = true
+  const res = await fetchConToken('/ordenes/pagos/mostrar')
+  if (res.status === 'ok' && res.datos) {
+    const hoyStr = getFechaHoy()
+    pagosDelDia.value = res.datos
+      .filter((p: any) => parseFechaLocal(p.fecha_pago) === hoyStr)
+      .map((p: any) => ({
+        id_pago: p.id_pago,
+        id_orden: p.id_orden,
+        numero_orden: p.numero_orden,
+        metodo_pago: p.metodo_pago || 'efectivo',
+        monto_pagado: Number(p.monto_pagado) || 0,
+        fecha_pago: p.fecha_pago
+      }))
+  }
+  isLoadingPagos.value = false
+}
+
+const statsCorteCaja = computed((): MetodoPagoStats[] => {
+  const mapa = new Map<string, { total: number; count: number }>()
+  pagosDelDia.value.forEach(p => {
+    const existente = mapa.get(p.metodo_pago) || { total: 0, count: 0 }
+    mapa.set(p.metodo_pago, {
+      total: existente.total + p.monto_pagado,
+      count: existente.count + 1
+    })
+  })
+  return Array.from(mapa.entries())
+    .map(([metodo, data]) => ({ metodo, ...data }))
+    .sort((a, b) => b.total - a.total)
+})
+
+const totalCorteCaja = computed(() =>
+  pagosDelDia.value.reduce((acc, p) => acc + p.monto_pagado, 0)
+)
+
+const ordenesCorteCaja = computed(() => {
+  const ordenesUnicas = new Set(pagosDelDia.value.map(p => p.id_orden))
+  return ordenesUnicas.size
 })
 
 // ── GRÁFICA ─────────────────────────────
@@ -256,6 +316,7 @@ const pathArea = computed(() => {
 
 onMounted(() => {
   loadData()
+  loadPagosDelDia()
 })
 </script>
 
@@ -385,6 +446,60 @@ onMounted(() => {
         </div>
       </div>
 
+      <!-- Corte de Caja -->
+      <div class="corte-caja-section">
+        <div class="corte-caja-header">
+          <div>
+            <h3>Corte de Caja del Día</h3>
+            <p>Resumen de ventas y métodos de pago del día actual</p>
+          </div>
+          <button @click="loadPagosDelDia" class="btn-refresh" :disabled="isLoadingPagos">
+            ⟳ Actualizar
+          </button>
+        </div>
+
+        <div class="corte-caja-kpis">
+          <div class="card kpi">
+            <span>Total del Día</span>
+            <h2>${{ totalCorteCaja.toFixed(2) }}</h2>
+          </div>
+
+          <div class="card kpi">
+            <span>Órdenes Pagadas</span>
+            <h2>{{ ordenesCorteCaja }}</h2>
+          </div>
+
+          <div class="card kpi">
+            <span>Ticket Promedio</span>
+            <h2>{{ ordenesCorteCaja > 0 ? '$' + (totalCorteCaja / ordenesCorteCaja).toFixed(2) : '$0.00' }}</h2>
+          </div>
+        </div>
+
+        <div class="card">
+          <span>Desglose por Método de Pago</span>
+          <div class="metodo-pago-list">
+            <div
+              v-for="mp in statsCorteCaja"
+              :key="mp.metodo"
+              class="metodo-pago-item"
+            >
+              <span class="metodo-label">{{ mp.metodo }}</span>
+              <div class="metodo-bar-container">
+                <div
+                  class="metodo-bar"
+                  :style="{ width: `${totalCorteCaja > 0 ? (mp.total / totalCorteCaja) * 100 : 0}%` }"
+                ></div>
+              </div>
+              <span class="metodo-total">${{ mp.total.toFixed(2) }}</span>
+              <span class="metodo-count">({{ mp.count }})</span>
+            </div>
+            <p v-if="statsCorteCaja.length === 0" class="no-data">
+              Sin pagos registrados el día de hoy
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div class="card table">
         <h3>Historial de Órdenes</h3>
 
@@ -403,7 +518,7 @@ onMounted(() => {
             <tr v-for="v in ventasFiltradas.slice(0, 20)" :key="v.id_orden">
               <td>{{ v.numero_orden }}</td>
               <td>{{ v.fecha }}</td>
-              <td>{{ v.nombre_cliente || '—' }}</td>
+              <td>{{ v.cliente || '—' }}</td>
               <td>
                 <span :class="['estado-badge', v.estado_orden?.toLowerCase()]">
                   {{ v.estado_orden }}
@@ -635,6 +750,107 @@ onMounted(() => {
   font-size: var(--font-size-sm, 13px);
   font-weight: var(--font-weight-medium, 500);
   color: var(--tenant-texto);
+}
+
+/* ── CORTE DE CAJA ── */
+.corte-caja-section {
+  margin-bottom: var(--espacio-5, 20px);
+}
+
+.corte-caja-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--espacio-4, 16px);
+}
+
+.corte-caja-header h3 {
+  margin: 0 0 4px 0;
+  font-size: var(--font-size-lg, 18px);
+  color: var(--tenant-texto);
+}
+
+.corte-caja-header p {
+  margin: 0;
+  font-size: var(--font-size-sm, 13px);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
+}
+
+.btn-refresh {
+  padding: var(--espacio-2, 8px) var(--espacio-3, 12px);
+  background: color-mix(in srgb, var(--tenant-texto) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tenant-texto) 10%, transparent);
+  color: var(--tenant-texto);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--tenant-fuente, sans-serif);
+  font-size: var(--font-size-sm, 13px);
+  transition: background 0.15s;
+}
+
+.btn-refresh:hover {
+  background: color-mix(in srgb, var(--tenant-texto) 8%, transparent);
+}
+
+.btn-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.corte-caja-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--espacio-4, 16px);
+  margin-bottom: var(--espacio-4, 16px);
+}
+
+.metodo-pago-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espacio-3, 12px);
+}
+
+.metodo-pago-item {
+  display: flex;
+  align-items: center;
+  gap: var(--espacio-2, 8px);
+}
+
+.metodo-label {
+  width: 80px;
+  font-size: var(--font-size-sm, 13px);
+  color: var(--tenant-texto);
+  text-transform: capitalize;
+}
+
+.metodo-bar-container {
+  flex: 1;
+  height: 8px;
+  background: color-mix(in srgb, var(--tenant-texto) 10%, transparent);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.metodo-bar {
+  height: 100%;
+  background: var(--tenant-secundario, #5C2D6D);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.metodo-total {
+  width: 80px;
+  text-align: right;
+  font-size: var(--font-size-sm, 13px);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--tenant-texto);
+}
+
+.metodo-count {
+  width: 40px;
+  text-align: right;
+  font-size: var(--font-size-sm, 13px);
+  color: color-mix(in srgb, var(--tenant-texto) 60%, transparent);
 }
 
 /* ── TABLA ── */
