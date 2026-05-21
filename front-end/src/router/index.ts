@@ -2,14 +2,14 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { API_URL } from '../config/api'
 
 // ── VISTAS Y LAYOUTS ────────────────────────────────────────────────────────
-import MainLayout          from '../layouts/MainLayout.vue' // <-- Importa tu nuevo layout
+import MainLayout          from '../layouts/MainLayout.vue'
 import LoginView           from '../views/Login.vue'
 import DashboardView       from '../views/Dashboard.vue'
 import VentaView           from '../views/Venta.vue'
 import KitchenDisplayView  from '../views/KitchenDisplay.vue'
 
-// ── ROLES ───────────────────────────────────────────────────────────────────
-// Roles disponibles: 'admin' | 'gerente' | 'cajero' | 'cocinero'
+// ── MAPEO: nombre de ruta → id_permiso en BD ────────────────────────────────
+// (Usado en meta.permissionId de cada ruta)
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -35,7 +35,7 @@ const router = createRouter({
     // ── PROTEGIDAS (Envueltas en MainLayout con Sidebar) ─────────────────────
     {
       path: '/',
-      component: MainLayout, // <-- El layout actúa como envoltura
+      component: MainLayout,
       meta: { requiresAuth: true },
       children: [
         {
@@ -46,61 +46,55 @@ const router = createRouter({
           path: 'dashboard',
           name: 'dashboard',
           component: DashboardView,
-          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
+          meta: { requiresAuth: true, permissionId: 1 },
         },
         {
           path: 'venta',
           name: 'venta',
           component: VentaView,
-          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
+          meta: { requiresAuth: true, permissionId: 2 },
         },
         {
           path: 'cocina',
           name: 'cocina',
           component: KitchenDisplayView,
-          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
+          meta: { requiresAuth: true, permissionId: 5 },
         },
         {
           path: 'menu',
           name: 'menu',
           component: () => import('../views/Menu.vue'),
-          meta: { roles: ['admin', 'caja'] },
+          meta: { requiresAuth: true, permissionId: 3 },
         },
         {
           path: 'ordenes',
           name: 'ordenes',
           component: () => import('../views/Ordenes.vue'),
-          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
+          meta: { requiresAuth: true, permissionId: 4 },
         },
         {
           path: 'clientes',
           name: 'clientes',
           component: () => import('../views/Clientes.vue'),
-          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
+          meta: { requiresAuth: true, permissionId: 6 },
         },
         {
           path: 'estadisticas',
           name: 'estadisticas',
           component: () => import('../views/Estadisticas.vue'),
-          meta: { roles: ['admin', 'caja'] },
+          meta: { requiresAuth: true, permissionId: 7 },
         },
         {
           path: 'usuarios',
           name: 'usuarios',
           component: () => import('../views/Usuarios.vue'),
-          meta: { roles: ['admin'], requiresAdmin: true },
-        },
-        {
-          path: 'personalizacion',
-          name: 'personalizacion',
-          component: () => import('../views/Personalizacion.vue'),
-          meta: { roles: ['admin'], requiresAdmin: true },
+          meta: { requiresAuth: true, permissionId: 8 },
         },
         {
           path: 'perfil',
           name: 'perfil',
           component: () => import('../views/Perfil.vue'),
-          meta: { roles: ['admin', 'caja', 'cocina', 'bebidas'] },
+          meta: { requiresAuth: true },
         },
       ],
     },
@@ -113,19 +107,10 @@ const router = createRouter({
   ],
 })
 
-// ── MAPEO DE ROL ─────────────────────────────────────────────────────────────
-const ROL_MAP: Record<string, string> = {
-  '1': 'admin',
-  '2': 'caja',
-  '3': 'cocina',
-  '4': 'bebidas',
-  '6': 'seguridad',
-}
-
 // ── RUTAS PÚBLICAS (sin validación de token) ───────────────────────────────
 const RUTAS_PUBLICAS = ['login', 'vista-publica', 'menu-publico']
 
-// ── VERIFICACIÓN DE TOKEN CON BACKEND ───────────────────────────────────────
+// ── VERIFICACIÓN DE TOKEN CON BACKEND ────────────────────────────────────────
 let tokenValidationPromise: Promise<boolean> | null = null
 
 async function validarTokenConBackend(): Promise<boolean> {
@@ -148,13 +133,45 @@ function limpiarSesion() {
   localStorage.removeItem('coffe_nombre')
 }
 
+// ── CARGAR PERMISOS EN LOGIN ────────────────────────────────────────────────
+async function cargarPermisos(): Promise<void> {
+  const token = localStorage.getItem('coffe_token')
+  if (!token) return
+
+  try {
+    const res = await fetch(`${API_URL}/api/usuarios/permisos/roles/mostrar`, {
+      headers: { 'auth-token': token }
+    })
+    const data = await res.json()
+    if (data.status === 'ok' && data.datos) {
+      const grouped: Record<number, number[]> = {}
+      for (const row of data.datos) {
+        if (!grouped[row.id_rol]) grouped[row.id_rol] = []
+        grouped[row.id_rol]!.push(row.id_permiso)
+      }
+      window.__permisosPorRol = grouped
+    }
+  } catch {
+    console.error('Error cargando permisos')
+  }
+}
+
+declare global {
+  interface Window {
+    __permisosPorRol: Record<number, number[]>
+  }
+}
+
+function tienePermiso(permissionId: number): boolean {
+  const rolId = Number(localStorage.getItem('coffe_role')) || 0
+  const permisos = window.__permisosPorRol?.[rolId] ?? []
+  return permisos.includes(permissionId)
+}
+
 // ── GUARDIA DE NAVEGACIÓN ────────────────────────────────────────────────────
 router.beforeEach(async (to, _from) => {
   const token           = localStorage.getItem('coffe_token')
   const isAuthenticated = token !== null
-
-  const rolId    = localStorage.getItem('coffe_role') ?? ''
-  const userRole = ROL_MAP[rolId] ?? null
 
   // 0. Rutas públicas sin validación de token
   if (RUTAS_PUBLICAS.includes(to.name as string)) {
@@ -178,19 +195,27 @@ router.beforeEach(async (to, _from) => {
     }
 
     const tokenValido = await tokenValidationPromise
-    tokenValidationPromise = null // Reset para próxima navegación
+    tokenValidationPromise = null
 
     if (!tokenValido) {
       limpiarSesion()
       return { name: 'login', query: { expired: 'true' } }
     }
+
+    // Cargar permisos si no están cargados
+    if (!window.__permisosPorRol) {
+      await cargarPermisos()
+    }
   }
 
-  // 3. Ruta con restricción de rol → verificar acceso
-  const allowedRoles = to.meta.roles as string[] | undefined
-  if (allowedRoles && userRole && !allowedRoles.includes(userRole)) {
-    if (userRole === 'cocina' || userRole === 'bebidas') return { name: 'cocina' }
-    return { name: 'dashboard' }
+  // 3. Verificar permiso específico de la ruta
+  const permissionId = to.meta.permissionId as number | undefined
+  if (permissionId !== undefined) {
+    if (!tienePermiso(permissionId)) {
+      const rolId = Number(localStorage.getItem('coffe_role')) || 0
+      if (rolId === 3 || rolId === 4) return { name: 'cocina' }
+      return { name: 'dashboard' }
+    }
   }
 
   // 4. Todo OK

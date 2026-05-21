@@ -5,15 +5,19 @@ import API_URL from '../config/api'
 
 const authStore = useAuthStore()
 
-// Permiso 4 = Administrar usuarios
-const puedeAdministrar = computed(() => authStore.tienePermiso(4))
+// Permiso 8 = Administrar usuarios (acceso a esta vista)
+const puedeAdministrar = computed(() => authStore.tienePermiso(8))
 
-// ── MAPEO DE NOMBRES DE PERMISOS ─────────────────────────────────────────────
+// ── MAPEO DE NOMBRES DE PERMISOS (vistas) ─────────────────────────────────────
 const NOMBRE_PERMISOS: Record<number, string> = {
-  1: 'Crear pedidos',
-  2: 'Ver pedidos',
-  3: 'Administrar inventario',
-  4: 'Administrar usuarios',
+  1: 'Dashboard',
+  2: 'Ventas',
+  3: 'Menú/Inventario',
+  4: 'Órdenes',
+  5: 'Cocina (KD)',
+  6: 'Clientes',
+  7: 'Estadísticas',
+  8: 'Usuarios',
 }
 
 // ── ESTADOS GLOBALES ─────────────────────────────────────────────────────────
@@ -89,6 +93,33 @@ const getPermisosDelRol = (rolId: number) => {
   return permisosRoles.value.filter((pr: any) => pr.id_rol === rolId).map((pr: any) => pr.id_permiso)
 }
 
+const getUsuariosDelRol = (rolId: number) => {
+  return usuarios.value.filter((u: any) => (u.id_rol || u.rol) === rolId)
+}
+
+const eliminarRol = async (rol: any) => {
+  const usuariosConEsteRol = getUsuariosDelRol(rol.id_rol)
+  
+  if (usuariosConEsteRol.length > 0) {
+    for (const user of usuariosConEsteRol) {
+      await fetchConToken('/usuarios/cambiar-rol', 'PUT', {
+        id_usuario: user.id_usuario || user.id,
+        nuevo_rol: rolSinAsignar
+      })
+    }
+  }
+  
+  const res = await fetchConToken(`/usuarios/rol/baja/${rol.id_rol}`, 'DELETE', null)
+  if (res.status === 'ok' || res.status === 200) {
+    showToast('Rol eliminado correctamente', 'success')
+    loadRoles()
+    loadPermisosRoles()
+    loadUsuarios()
+  } else {
+    showToast(res.mensaje || 'No se pudo eliminar el rol', 'error')
+  }
+}
+
 const togglePermiso = (rolId: number, permisoId: number) => {
   const key = `${rolId}-${permisoId}`
   if (permisosCambiados.value.has(key)) {
@@ -124,11 +155,12 @@ const guardarPermisosCambiados = async () => {
 
 // ── ESTADOS Y LÓGICA DEL MODAL ───────────────────────────────────────────────
 const showModal = ref(false)
-const modalType = ref<'crear' | 'editar' | 'eliminar' | 'cambiar-rol'>('crear')
+const modalType = ref<'crear' | 'editar' | 'eliminar' | 'cambiar-rol' | 'crear-rol'>('crear')
 const formData = ref<Record<string, any>>({})
 const isSubmitting = ref(false)
 let toastTimeout: ReturnType<typeof setTimeout> | null = null
 const toast = ref<{ visible: boolean; message: string; type: 'success' | 'error' }>({ visible: false, message: '', type: 'success' })
+const rolSinAsignar = 7
 
 const showToast = (message: string, type: 'success' | 'error' = 'success') => {
   if (toastTimeout) clearTimeout(toastTimeout)
@@ -138,7 +170,7 @@ const showToast = (message: string, type: 'success' | 'error' = 'success') => {
   }, 3000)
 }
 
-const openModal = (type: 'crear' | 'editar' | 'eliminar' | 'cambiar-rol', user: any = null) => {
+const openModal = (type: 'crear' | 'editar' | 'eliminar' | 'cambiar-rol' | 'crear-rol', user: any = null, rol: any = null) => {
   if (!puedeAdministrar.value && type !== 'cambiar-rol') return
 
   modalType.value = type
@@ -162,6 +194,8 @@ const openModal = (type: 'crear' | 'editar' | 'eliminar' | 'cambiar-rol', user: 
       id_usuario: user.id_usuario || user.id,
       nuevo_rol: user.id_rol || user.rol
     }
+  } else if (type === 'crear-rol') {
+    formData.value = { nombre_rol: '', descripcion: '' }
   }
   showModal.value = true
 }
@@ -195,6 +229,9 @@ const handleSubmit = async () => {
       endpoint = '/usuarios/cambiar-rol'
       method = 'PUT'
       break
+    case 'crear-rol':
+      endpoint = '/usuarios/rol/alta'
+      break
   }
 
   const res = await fetchConToken(endpoint, method, payload)
@@ -205,10 +242,15 @@ const handleSubmit = async () => {
       : modalType.value === 'editar' ? 'Usuario actualizado correctamente'
       : modalType.value === 'eliminar' ? 'Usuario eliminado correctamente'
       : modalType.value === 'cambiar-rol' ? 'Rol cambiado correctamente'
+      : modalType.value === 'crear-rol' ? 'Rol creado correctamente'
       : 'Operación exitosa'
     showToast(msg, 'success')
     closeModal()
-    loadUsuarios()
+    if (modalType.value === 'crear-rol') {
+      loadRoles()
+    } else {
+      loadUsuarios()
+    }
   } else {
     showToast(res.mensaje || 'No se pudo procesar la solicitud', 'error')
   }
@@ -409,6 +451,17 @@ onMounted(() => {
             </div>
           </template>
 
+          <template v-if="modalType === 'crear-rol'">
+            <div class="form-group">
+              <label>Nombre del Rol:</label>
+              <input v-model="formData.nombre_rol" type="text" required class="form-input" placeholder="Ej: Gerente" />
+            </div>
+            <div class="form-group">
+              <label>Descripción (opcional):</label>
+              <textarea v-model="formData.descripcion" class="form-input" rows="2" placeholder="Descripción del rol..."></textarea>
+            </div>
+          </template>
+
           <div class="modal-actions">
             <button type="button" @click="closeModal" class="btn-cancel" :disabled="isSubmitting">Cancelar</button>
             <button type="submit" :class="modalType === 'eliminar' ? 'btn-danger' : 'btn-primary'" :disabled="isSubmitting">
@@ -427,14 +480,19 @@ onMounted(() => {
           <h2 class="section-title">Administración de Permisos por Rol</h2>
           <p class="section-subtitle">Configura qué permisos tiene cada rol del sistema.</p>
         </div>
-        <button 
-          v-if="permisosCambiados.size > 0" 
-          @click="guardarPermisosCambiados" 
-          class="btn-primary"
-          :disabled="isSavingPermisos"
-        >
-          {{ isSavingPermisos ? 'Guardando...' : 'Guardar Cambios' }}
-        </button>
+        <div class="permisos-header-actions">
+          <button @click="openModal('crear-rol')" class="btn-primary">
+            + Crear Rol
+          </button>
+          <button 
+            v-if="permisosCambiados.size > 0" 
+            @click="guardarPermisosCambiados" 
+            class="btn-primary"
+            :disabled="isSavingPermisos"
+          >
+            {{ isSavingPermisos ? 'Guardando...' : 'Guardar Cambios' }}
+          </button>
+        </div>
       </div>
 
       <div class="permisos-table-container">
@@ -447,7 +505,20 @@ onMounted(() => {
           </thead>
           <tbody>
             <tr v-for="rol in roles" :key="rol.id_rol">
-              <td class="rol-cell">{{ rol.nombre_rol }}</td>
+              <td class="rol-cell">
+                <div class="rol-cell-content">
+                  {{ rol.nombre_rol }}
+                  <button 
+                    @click="eliminarRol(rol)" 
+                    class="delete-rol-btn" 
+                    title="Eliminar rol"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                    </svg>
+                  </button>
+                </div>
+              </td>
               <td v-for="permiso in permisos" :key="permiso.id_permiso" class="permiso-cell">
                 <input 
                   type="checkbox" 
@@ -545,6 +616,7 @@ onMounted(() => {
 /* ── PERMISOS ── */
 .permisos-section { margin-top: var(--espacio-4, 16px); }
 .permisos-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--espacio-4, 16px); flex-wrap: wrap; gap: var(--espacio-3, 12px); }
+.permisos-header-actions { display: flex; gap: var(--espacio-2, 8px); flex-wrap: wrap; }
 .section-title { font-size: var(--font-size-lg, 20px); font-weight: 600; margin: 0 0 var(--espacio-2, 8px) 0; color: var(--tenant-texto, #111827); }
 .section-subtitle { font-size: var(--font-size-sm, 13px); color: var(--tenant-texto-muted, #6b7280); margin: 0; }
 .permisos-table-container { overflow-x: auto; background: var(--color-superficie, #ffffff); border: 1px solid var(--color-borde, #e5e7eb); border-radius: 8px; }
@@ -553,6 +625,10 @@ onMounted(() => {
 .permisos-table th { background: var(--color-superficie-alt, #f3f4f6); font-weight: 600; color: var(--tenant-texto, #111827); }
 .permisos-table tr:last-child td { border-bottom: none; }
 .rol-cell { font-weight: 500; color: var(--tenant-texto, #111827); }
+.rol-cell-content { display: flex; align-items: center; gap: var(--espacio-2, 8px); }
+.delete-rol-btn { background: none; border: none; cursor: pointer; color: var(--color-cancelar, #ef4444); padding: 4px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: background 0.15s; }
+.delete-rol-btn:hover { background: rgba(220, 38, 38, 0.1); }
+.delete-rol-btn svg { width: 16px; height: 16px; }
 .permiso-cell { text-align: center; }
 .permiso-checkbox { width: 18px; height: 18px; cursor: pointer; accent-color: var(--tenant-primario, #002D72); }
 .permiso-checkbox.pending-change { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3); }

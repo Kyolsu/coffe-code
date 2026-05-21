@@ -338,7 +338,7 @@ router.post('/pagos/agregar', verificarToken, async (req, res) => {
         const { id_orden, metodo, monto, referencia } = req.body;
         const id_usuario = req.usuario.id_usuario; 
 
-        if (!id_orden || !metodo || !monto) {
+        if (!id_orden || !metodo || monto === undefined || monto === null) {
             return res.status(400).json({ status: "error", mensaje: "Faltan datos obligatorios" });
         }
 
