@@ -196,14 +196,17 @@ const clientesDisponibles = ref<any[]>([])
 const selectedClientes = ref<number[]>([])
 const promoBusquedaCliente = ref('')
 const promoAplicarPaquetes = ref(false)
-const promoProductosSeleccionados = ref<number[]>([])
-const promoPaquetesSeleccionados = ref<number[]>([])
+const promoProductosSeleccionados = ref<any>([])
+const promoPaquetesSeleccionados = ref<any>([])
 const promoCategoriaFiltro = ref<string>('')
 const promoScope = ref<'todos' | 'productos' | 'categorias'>('todos')
 const promoCategoriasSeleccionadas = ref<string[]>([])
 const promoTipoAplicacion = ref<'general' | 'registrados' | 'especifico'>('general')
-const allClienteIds = ref<number[]>([])     // IDs de todos los clientes (modo "registrados")
+const allClienteIds = ref<number[]>([])      // IDs de todos los clientes (modo "registrados")
 const loadedSpecificIds = ref<number[]>([]) // IDs específicos cargados de BD (para restaurarlos al volver a específico)
+const descuentoFijoTipo = ref<'producto' | 'paquete'>('producto')
+const promoCategoriaDescuentoFijo = ref<string>('')
+const formData = ref<Record<string, any>>({})
 
 // Variables para menú - productos y paquetes vinculados
 const menuProductosSeleccionados = ref<number[]>([])
@@ -249,7 +252,7 @@ const getPromoProductosFiltrados = (categoria: string) => {
 }
 
 const paquetesActivos = computed(() => {
-  return paquetes.value.filter((p: any) => p.disponibilidad !== false)
+  return paquetes.value.filter((p: any) => p._activo !== false)
 })
 
 const addGrupo = () => {
@@ -270,6 +273,35 @@ watch(promoTipoAplicacion, (newVal, oldVal) => {
     // Limpiar selección
     selectedClientes.value = []
     loadedSpecificIds.value = []
+  }
+})
+
+// Cuando cambia entre producto/paquete en descuento_fijo, limpiar el otro
+watch(descuentoFijoTipo, (newVal) => {
+  if (newVal === 'producto') {
+    promoPaquetesSeleccionados.value = []
+  } else {
+    promoProductosSeleccionados.value = []
+  }
+})
+
+watch(() => formData.value.tipo, (newTipo, oldTipo) => {
+  if (oldTipo === undefined) return
+  if (newTipo === 'descuento_fijo') {
+    if (descuentoFijoTipo.value === 'producto') {
+      promoPaquetesSeleccionados.value = []
+    } else {
+      promoProductosSeleccionados.value = []
+    }
+  } else if (oldTipo === 'descuento_fijo') {
+    promoProductosSeleccionados.value = []
+    promoPaquetesSeleccionados.value = []
+  }
+})
+
+watch(() => formData.value.tipo, (newTipo) => {
+  if (newTipo === 'descuento_fijo' && descuentoFijoTipo.value === undefined) {
+    descuentoFijoTipo.value = promoPaquetesSeleccionados.value.length > 0 ? 'paquete' : 'producto'
   }
 })
 
@@ -310,7 +342,6 @@ const setTab = (tabId: string) => {
 // ── LÓGICA DEL MODAL Y CRUD (CREAR/EDITAR) ───────────────────────────────────
 const showModal = ref(false)
 const modalType = ref('')
-const formData = ref<Record<string, any>>({})
 const isSubmitting = ref(false)
 const isEditing = ref(false)
 const editingId = ref<string | number | null>(null)
@@ -360,6 +391,7 @@ const openAddModal = async (type: string) => {
     promoAplicarPaquetes.value = false
     promoScope.value = 'todos'
     selectedDiasPaquete.value = []
+    descuentoFijoTipo.value = 'producto'
     await Promise.all([
       loadProductosParaPaquetes(),
       loadClientesParaPromocion(),
@@ -497,7 +529,7 @@ const handleEdit = async (type: string, item: any) => {
       selectedDiasPaquete.value = []
     }
 
-// Cargar grupos del paquete
+    // Cargar grupos del paquete
     try {
       // Usar menu-completo que devuelve grupos con sus productos
       const resMenuCompleto = await fetchConToken('/paquetes/menu-completo')
@@ -533,11 +565,11 @@ const handleEdit = async (type: string, item: any) => {
           console.log('Grupos cargados:', paqueteGrupos.value)
         }
       }
-} catch (e) {
+    } catch (e) {
       console.error('Error al cargar grupos del paquete', e)
     }
   }
-else if (type === 'promocion') {
+  else if (type === 'promocion') {
     const promoId = item.id_promocion || item.id
     editingId.value = promoId
     formData.value.nombre = item.nombre_promocion || item.nombre || item.promocion || ''
@@ -550,12 +582,15 @@ else if (type === 'promocion') {
     if (tipoNorm === 'porcentaje') tipoNorm = 'descuento'
     else if (tipoNorm === 'bogo' || tipoNorm === '2x1' || tipoNorm === '2 x 1') tipoNorm = '2x1'
     else if (tipoNorm === 'monto' || tipoNorm === 'fijo' || tipoNorm === '固定') tipoNorm = 'fijo'
+    else if (tipoNorm === 'descuento_fijo' || tipoNorm === 'descuento fijo') tipoNorm = 'descuento_fijo'
     console.log('DEBUG - tipo_norm normalized:', tipoNorm)
     formData.value.tipo = tipoNorm
     
     formData.value.valor = item.valor || item.valor_descuento || 0
     formData.value.es_temporal = item.es_temporal || item.tipo_vigencia === 'temporal' || false
     formData.value.es_permanente = item.es_permanente || item.tipo_vigencia === 'permanente' || false
+    formData.value.categoria = item.categoria || null
+    promoCategoriaDescuentoFijo.value = item.categoria || ''
     
     // Parsear fechas para datetime-local
     if (item.fecha_inicio) {
@@ -617,9 +652,17 @@ else if (type === 'promocion') {
         const productosPromo = resProdPromo.datos.filter((pp: any) => pp.id_promocion === promoId)
         promoProductosSeleccionados.value = productosPromo.map((pp: any) => pp.id_producto)
         
+        // IMPORTANTE: Convertir a primitivo si es descuento fijo para que el radio button funcione
+        if (formData.value.tipo === 'descuento_fijo' && promoProductosSeleccionados.value.length > 0) {
+          promoProductosSeleccionados.value = promoProductosSeleccionados.value[0]
+        }
+
         // Determinar el ámbito - si hay productos, es por productos
-        if (productosPromo.length > 0) {
+        if (productosPromo.length > 0 && formData.value.tipo !== 'descuento_fijo') {
           promoScope.value = 'productos'
+        }
+        if (formData.value.tipo === 'descuento_fijo' && productosPromo.length > 0) {
+          descuentoFijoTipo.value = 'producto'
         }
       }
     } catch (e) {
@@ -632,16 +675,26 @@ else if (type === 'promocion') {
       if (resPaqPromo.datos) {
         const paquetesPromo = resPaqPromo.datos.filter((pp: any) => pp.id_promocion === promoId)
         promoPaquetesSeleccionados.value = paquetesPromo.map((pp: any) => pp.id_paquete)
-        
+
+        // IMPORTANTE: Convertir a primitivo si es descuento fijo para que el radio button funcione
+        if (formData.value.tipo === 'descuento_fijo' && promoPaquetesSeleccionados.value.length > 0) {
+          promoPaquetesSeleccionados.value = promoPaquetesSeleccionados.value[0]
+        }
+
         if (paquetesPromo.length > 0) {
           promoAplicarPaquetes.value = true
+          if (formData.value.tipo === 'descuento_fijo') {
+            descuentoFijoTipo.value = 'paquete'
+          }
+        } else if (formData.value.tipo === 'descuento_fijo') {
+          descuentoFijoTipo.value = 'producto'
         }
       }
     } catch (e) {
       console.error('Error al cargar paquetes de promoción', e)
     }
 
-// Cargar clientes vinculados a la promoción
+    // Cargar clientes vinculados a la promoción
     try {
       const resCliPromo = await fetchConToken('/promociones/clientes/mostrar')
       if (resCliPromo.datos) {
@@ -780,6 +833,7 @@ const handleReactivate = async (type: string, item: any) => {
     showToast(res.mensaje || 'Error al reactivar', 'error')
   }
 }
+
 // ── ENVÍO DE FORMULARIOS ─────────────────────────────────────────────────────
 const closeModal = () => {
   showModal.value = false
@@ -825,9 +879,23 @@ const handleSubmit = async () => {
   }
 
   if (modalType.value === 'promocion' && !isEditing.value) {
-    if (promoScope.value === 'productos' && promoProductosSeleccionados.value.length === 0) {
+    // Forzar en array para poder medir el .length correctamente
+    const prodsToValidate = Array.isArray(promoProductosSeleccionados.value) ? promoProductosSeleccionados.value : (promoProductosSeleccionados.value ? [promoProductosSeleccionados.value] : [])
+    const paqsToValidate = Array.isArray(promoPaquetesSeleccionados.value) ? promoPaquetesSeleccionados.value : (promoPaquetesSeleccionados.value ? [promoPaquetesSeleccionados.value] : [])
+
+    if (promoScope.value === 'productos' && formData.value.tipo !== 'descuento_fijo' && prodsToValidate.length === 0) {
       showToast('Selecciona al menos un producto', 'error')
       return
+    }
+    if (formData.value.tipo === 'descuento_fijo') {
+      if (descuentoFijoTipo.value === 'producto' && prodsToValidate.length !== 1) {
+        showToast('Selecciona exactamente 1 producto para descuento gratis', 'error')
+        return
+      }
+      if (descuentoFijoTipo.value === 'paquete' && paqsToValidate.length !== 1) {
+        showToast('Selecciona exactamente 1 paquete para descuento gratis', 'error')
+        return
+      }
     }
     if (promoScope.value === 'categorias' && promoCategoriasSeleccionadas.value.length === 0) {
       showToast('Selecciona al menos una categoría', 'error')
@@ -895,7 +963,8 @@ const handleSubmit = async () => {
       hora_fin: formData.value.hora_fin || null,
       dias: selectedDiasPaquete.value.length > 0 ? `{${selectedDiasPaquete.value.join(',')}}` : null,
       es_permanente: !formData.value.es_temporal,
-      solo_clientes: formData.value.solo_clientes || false
+      solo_clientes: formData.value.solo_clientes || false,
+      categoria: formData.value.tipo === 'descuento_fijo' ? promoCategoriaDescuentoFijo.value : null
     }
     console.log('Enviando promoción:', promoData, 'tipo valor:', typeof valorEnvio)
     const res = await fetchConToken('/promociones/agregar', 'POST', promoData)
@@ -903,8 +972,12 @@ const handleSubmit = async () => {
     if (res.status === 'ok' || res.status === 201) {
       const idPromo = res.id_promocion
 
-      if (promoScope.value === 'productos' && promoProductosSeleccionados.value.length > 0) {
-        for (const idProd of promoProductosSeleccionados.value) {
+      // Forzamos los datos a ser un arreglo para poder iterarlos
+      const prodsToLinkCreate = Array.isArray(promoProductosSeleccionados.value) ? promoProductosSeleccionados.value : (promoProductosSeleccionados.value ? [promoProductosSeleccionados.value] : [])
+      const paqsToLinkCreate = Array.isArray(promoPaquetesSeleccionados.value) ? promoPaquetesSeleccionados.value : (promoPaquetesSeleccionados.value ? [promoPaquetesSeleccionados.value] : [])
+
+      if ((promoScope.value === 'productos' || formData.value.tipo === 'descuento_fijo') && prodsToLinkCreate.length > 0) {
+        for (const idProd of prodsToLinkCreate) {
           await fetchConToken('/promociones/productos/vincular', 'POST', {
             id_promocion: idPromo,
             id_producto: idProd
@@ -924,8 +997,8 @@ const handleSubmit = async () => {
         }
       }
 
-      if (promoAplicarPaquetes.value && promoPaquetesSeleccionados.value.length > 0) {
-        for (const idPaq of promoPaquetesSeleccionados.value) {
+      if ((promoAplicarPaquetes.value || formData.value.tipo === 'descuento_fijo') && paqsToLinkCreate.length > 0) {
+        for (const idPaq of paqsToLinkCreate) {
           await fetchConToken('/promociones/paquetes/vincular', 'POST', {
             id_promocion: idPromo,
             id_paquete: idPaq
@@ -1119,23 +1192,24 @@ const handleSubmit = async () => {
       // Si es edición de promoción, actualizar los datos relacionados
       if (modalType.value === 'promocion' && isEditing.value && editingId.value) {
         try {
-          // Actualizar productos vinculados
+          // ── ACTUALIZAR PRODUCTOS VINCULADOS ──
           const resProdActual = await fetchConToken('/promociones/productos/mostrar')
           const productosActuales = resProdActual.datos 
             ? resProdActual.datos.filter((pp: any) => pp.id_promocion === editingId.value).map((pp: any) => pp.id_producto)
             : []
           
-          // Desvincular productos que ya no están seleccionados
+          // Reempaquetado seguro contra el v-model del radio button
+          const prodsToLink = Array.isArray(promoProductosSeleccionados.value) ? promoProductosSeleccionados.value : (promoProductosSeleccionados.value ? [promoProductosSeleccionados.value] : [])
+          
           for (const idProd of productosActuales) {
-            if (!promoProductosSeleccionados.value.includes(idProd)) {
+            if (!prodsToLink.includes(idProd)) {
               await fetchConToken('/promociones/productos/desvincular', 'DELETE', {
                 id_promocion: editingId.value,
                 id_producto: idProd
               })
             }
           }
-          // Vincular nuevos productos
-          for (const idProd of promoProductosSeleccionados.value) {
+          for (const idProd of prodsToLink) {
             if (!productosActuales.includes(idProd)) {
               await fetchConToken('/promociones/productos/vincular', 'POST', {
                 id_promocion: editingId.value,
@@ -1144,21 +1218,24 @@ const handleSubmit = async () => {
             }
           }
           
-          // Actualizar paquetes vinculados
+          // ── ACTUALIZAR PAQUETES VINCULADOS ──
           const resPaqActual = await fetchConToken('/promociones/paquetes/mostrar')
           const paquetesActuales = resPaqActual.datos 
             ? resPaqActual.datos.filter((pp: any) => pp.id_promocion === editingId.value).map((pp: any) => pp.id_paquete)
             : []
           
+          // Reempaquetado seguro contra el v-model del radio button
+          const paqsToLink = Array.isArray(promoPaquetesSeleccionados.value) ? promoPaquetesSeleccionados.value : (promoPaquetesSeleccionados.value ? [promoPaquetesSeleccionados.value] : [])
+          
           for (const idPaq of paquetesActuales) {
-            if (!promoPaquetesSeleccionados.value.includes(idPaq)) {
+            if (!paqsToLink.includes(idPaq)) {
               await fetchConToken('/promociones/paquetes/desvincular', 'DELETE', {
                 id_promocion: editingId.value,
                 id_paquete: idPaq
               })
             }
           }
-          for (const idPaq of promoPaquetesSeleccionados.value) {
+          for (const idPaq of paqsToLink) {
             if (!paquetesActuales.includes(idPaq)) {
               await fetchConToken('/promociones/paquetes/vincular', 'POST', {
                 id_promocion: editingId.value,
@@ -1646,7 +1723,6 @@ onMounted(() => {
       </div>
     </main>
 
-    <!-- Toast Notifications -->
     <div class="toast-container">
       <div v-for="toast in toasts" :key="toast.id" :class="['toast', toast.type]">
         <span v-if="toast.type === 'success'">&#10003;</span>
@@ -1875,10 +1951,8 @@ onMounted(() => {
                 <label>Tipo de Promoción:</label>
                 <select v-model="formData.tipo" required class="form-select">
                   <option disabled value="">Selecciona...</option>
-                  <option value="descuento">Descuento (%)</option>
                   <option value="2x1">2x1</option>
-                  <option value="fijo">Precio Fijo</option>
-                  <option value="otro">Otro</option>
+                  <option value="descuento_fijo">Descuento Fijo (100% gratis)</option>
                 </select>
               </div>
               <div class="form-group">
@@ -1887,8 +1961,7 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Ámbito de aplicación -->
-            <div class="form-group">
+            <div v-if="formData.tipo !== 'descuento_fijo'" class="form-group">
               <label>Ámbito de aplicación:</label>
               <div class="scope-options">
                 <label class="radio-label">
@@ -1902,8 +1975,21 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Selector de productos específicos -->
-            <div v-if="promoScope === 'productos'" class="productos-grupo">
+            <div v-if="formData.tipo === 'descuento_fijo'" class="form-group">
+              <label>¿Qué será gratis?</label>
+              <div class="scope-options">
+                <label class="radio-label">
+                  <input type="radio" v-model="descuentoFijoTipo" value="producto" :disabled="promoPaquetesSeleccionados.length > 0" />
+                  Un producto específico
+                </label>
+                <label class="radio-label">
+                  <input type="radio" v-model="descuentoFijoTipo" value="paquete" :disabled="promoProductosSeleccionados.length > 0" />
+                  Un paquete completo
+                </label>
+              </div>
+            </div>
+
+            <div v-if="promoScope === 'productos' && formData.tipo !== 'descuento_fijo'" class="productos-grupo">
               <div class="productos-filtro">
                 <label>Filtrar por categoría:</label>
                 <select v-model="promoCategoriaFiltro" class="form-select" style="width: auto; min-width: 150px;">
@@ -1920,8 +2006,34 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Selector de categorías -->
-            <div v-if="promoScope === 'categorias'" class="form-group">
+            <div v-if="formData.tipo === 'descuento_fijo' && descuentoFijoTipo === 'producto'" class="productos-grupo">
+              <div class="productos-filtro">
+                <label>Categoría:</label>
+                <select v-model="promoCategoriaDescuentoFijo" class="form-select" style="width: auto; min-width: 150px;">
+                  <option value="">Todas</option>
+                  <option v-for="cat in categoriasUnicas" :key="cat" :value="cat">{{ cat }}</option>
+                </select>
+              </div>
+              <div class="productos-list">
+                <label v-for="prod in getPromoProductosFiltrados(promoCategoriaDescuentoFijo)" :key="prod.id_producto" class="producto-option">
+                  <input type="radio" :value="prod.id_producto" v-model="promoProductosSeleccionados" :name="`df-prod-${prod.id_producto}`" />
+                  <span>{{ prod.nombre_producto }}</span>
+                  <span class="prod-cat">({{ prod.categoria }})</span>
+                </label>
+              </div>
+            </div>
+
+            <div v-if="formData.tipo === 'descuento_fijo' && descuentoFijoTipo === 'paquete'" class="productos-grupo">
+              <div class="productos-list">
+                <label v-for="paq in paquetesActivos" :key="paq.id || paq.id_paquete" class="producto-option">
+                  <input type="radio" :value="paq.id || paq.id_paquete" v-model="promoPaquetesSeleccionados" :name="`df-paq-${paq.id || paq.id_paquete}`" />
+                  <span>{{ paq.nombre_paquete || paq.nombre || paq.paquete }}</span>
+                  <span class="prod-cat">(${{ paq.precio }})</span>
+                </label>
+              </div>
+            </div>
+
+            <div v-if="promoScope === 'categorias' && formData.tipo !== 'descuento_fijo'" class="form-group">
               <label>Selecciona categorías:</label>
               <div class="categorias-selector">
                 <label v-for="cat in categoriasUnicas" :key="cat" class="categoria-checkbox">
@@ -1931,7 +2043,6 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Temporal -->
             <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 12px;">
               <input v-model="formData.es_temporal" type="checkbox" id="promoTempCheck" />
               <label for="promoTempCheck" style="margin:0; cursor:pointer;">¿Es Temporal?</label>
@@ -1948,7 +2059,6 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Días -->
             <div class="form-group">
               <label>Días disponibles:</label>
               <div class="dias-semana-container">
@@ -1959,7 +2069,6 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Horario -->
             <div class="form-row">
               <div class="form-group">
                 <label>Hora Inicio (Opcional):</label>
@@ -1971,7 +2080,6 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Tipo de aplicación -->
             <div class="form-group">
               <label>Aplicar a:</label>
               <div class="tipo-aplicacion-opciones">
@@ -1990,7 +2098,6 @@ onMounted(() => {
               </div>
             </div>
 
-            <!-- Selector de clientes específicos -->
             <div v-if="promoTipoAplicacion === 'especifico'" class="clientes-selector">
               <div class="form-group">
                 <label>Buscar clientes:</label>
