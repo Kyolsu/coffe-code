@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import API_URL from '../config/api'
+import { API_URL, CLOUD_API } from '../config/api'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -169,11 +169,20 @@ const selectOrder = (id: number) => {
 }
 
 const markReady = async (id: number) => {
+  const orden = orders.value.find(o => o.id === id)
   const res = await fetchConToken(`/ordenes/modificar/${id}`, 'PUT', { estado_orden: 'lista' })
 
   if (res.status === 'ok') {
     orders.value = orders.value.filter(o => o.id !== id)
     selectedId.value = null
+
+    if (orden) {
+      fetch(`${CLOUD_API}/ordenes/sync-estado`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ numero_orden: orden.numero_orden, estado_orden: 'lista' })
+      }).catch(err => console.error('Sync estado error:', err.message))
+    }
   } else {
     error.value = res.mensaje || 'Error al marcar orden como lista'
   }
@@ -219,10 +228,19 @@ const navigateOrders = (direction: number) => {
 }
 
 const markRejected = async (id: number) => {
+  const orden = orders.value.find(o => o.id === id)
   const res = await fetchConToken(`/ordenes/modificar/${id}`, 'PUT', { estado_orden: 'cancelada' })
   if (res.status === 'ok') {
     orders.value = orders.value.filter(o => o.id !== id)
     selectedId.value = null
+
+    if (orden) {
+      fetch(`${CLOUD_API}/ordenes/sync-estado`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ numero_orden: orden.numero_orden, estado_orden: 'cancelada' })
+      }).catch(err => console.error('Sync estado error:', err.message))
+    }
   } else {
     error.value = res.mensaje || 'Error al rechazar orden'
   }

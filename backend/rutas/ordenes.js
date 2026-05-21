@@ -6,7 +6,7 @@ const saltRounds = 10;
 const jwt = require('jsonwebtoken');
 const verificarToken = require('../middleware/auth');
 
-const CLOUD_URL = process.env.RENDER_URL || 'https://coffe-code-s7t9.onrender.com';
+const CLOUD_URL = process.env.RENDER_URL || 'https://coffe-code-s7t9.onrender.com/api';
 
 
 router.post('/agregar', verificarToken, async (req, res) => {
@@ -65,12 +65,18 @@ router.post('/agregar', verificarToken, async (req, res) => {
             numero_seguimiento: numero_orden
         });
 
+        console.log('NODE_ENV:', process.env.NODE_ENV);
+        console.log('¿Enviando a cloud?', process.env.NODE_ENV !== 'production');
+        console.log('URL completa:', `${CLOUD_URL}/ordenes/sync`);
+
         if (process.env.NODE_ENV !== 'production') {
-            fetch(`${CLOUD_URL}/ordenes/agregar`, {
+            fetch(`${CLOUD_URL}/ordenes/sync`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(nuevaOrden)
-            }).catch(err => console.error('Sync error to cloud:', err.message));
+            }).then(r => console.log('Cloud response:', r.status, r.statusText)).catch(err => console.error('Sync error to cloud:', err.message));
+        } else {
+            console.log('NO se envía a cloud (estoy en production)');
         }
 
     } catch (err) {
@@ -119,6 +125,35 @@ router.delete('/cancelar/:id', verificarToken, async (req, res) => {
             status: "error",
             mensaje: "Error interno al intentar procesar la cancelación"
         });
+    }
+});
+
+// Endpoint público para sync de estado de orden (sin auth)
+router.post('/sync-estado', async (req, res) => {
+    try {
+        const { numero_orden, estado_orden } = req.body
+
+        if (!numero_orden || !estado_orden) {
+            return res.status(400).json({ status: 'error', mensaje: 'numero_orden y estado_orden son requeridos' })
+        }
+
+        const query = `
+            UPDATE ordenes 
+            SET estado_orden = $1, fecha_actualizacion = NOW()
+            WHERE numero_orden = $2
+            RETURNING id_orden, estado_orden, numero_orden
+        `
+
+        const result = await db.query(query, [estado_orden, numero_orden])
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ status: 'error', mensaje: 'Orden no encontrada' })
+        }
+
+        res.json({ status: 'ok', datos: result.rows[0] })
+    } catch (err) {
+        console.error('Error en sync-estado:', err.message)
+        res.status(500).json({ status: 'error', mensaje: err.message })
     }
 });
 
