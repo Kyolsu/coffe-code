@@ -83,6 +83,8 @@ interface Promocion {
   dias_aplicables?: string | string[] | null
   clientes?: number[]
   productos?: number[]
+  categoria?: string | null
+  paquetes?: number[]
 }
 
 interface Beneficio {
@@ -231,6 +233,7 @@ const appliedPromociones = ref<{ id_promocion: number; nombre: string; tipo: str
 const showPromoModal = ref(false)
 const selectedPromo = ref<Promocion | null>(null)
 const promoProductos = ref<any[]>([])
+const promoPaquetes = ref<any[]>([])
 const promoSelectedProducts = ref<Record<number, number>>({})
 
 // Items de promoción con sus modifiers personalizados
@@ -244,6 +247,8 @@ const promoItemsWithModifiers = ref<PromoItemWithModifiers[]>([])
 // Contexto para saber si el modal de opciones se abre desde promoción
 const isPromoContext = ref(false)
 const promoContextProduct = ref<Producto | null>(null)
+const promoContextPaquete = ref<any>(null)
+const isPromoPaqueteContext = ref(false)
 
 const totalPromoSeleccionados = computed(() => {
   return promoItemsWithModifiers.value.length
@@ -471,9 +476,10 @@ const loadPaquetes = async () => {
 const loadPromociones = async () => {
   console.log('=== loadPromociones START ===')
   try {
-    const [promosRes, prodPromosRes, cliPromosRes] = await Promise.all([
+    const [promosRes, prodPromosRes, paqPromosRes, cliPromosRes] = await Promise.all([
       fetchConToken('/promociones/mostrar'),
       fetchConToken('/promociones/productos/mostrar'),
+      fetchConToken('/promociones/paquetes/mostrar'),
       fetchConToken('/promociones/clientes/mostrar')
     ])
     
@@ -485,24 +491,32 @@ const loadPromociones = async () => {
       console.log('📦 DEBUG - Promociones raw:', JSON.stringify(promosRes.datos))
       console.log('📦 DEBUG - Promociones keys:', Object.keys(promosRes.datos[0]))
       
-      // Map productos y clientes por promoción
+      // Map productos, paquetes y clientes por promoción
       const productosPorPromo = new Map<number, number[]>()
+      const paquetesPorPromo = new Map<number, number[]>()
       const clientesPorPromo = new Map<number, number[]>()
-      
+
       if (prodPromosRes.datos) {
         (prodPromosRes.datos as any[]).forEach((pp: any) => {
           if (!productosPorPromo.has(pp.id_promocion)) productosPorPromo.set(pp.id_promocion, [])
           productosPorPromo.get(pp.id_promocion)!.push(pp.id_producto)
         })
       }
-      
+
+      if (paqPromosRes.datos) {
+        (paqPromosRes.datos as any[]).forEach((pp: any) => {
+          if (!paquetesPorPromo.has(pp.id_promocion)) paquetesPorPromo.set(pp.id_promocion, [])
+          paquetesPorPromo.get(pp.id_promocion)!.push(pp.id_paquete)
+        })
+      }
+
       if (cliPromosRes.datos) {
         (cliPromosRes.datos as any[]).forEach((cp: any) => {
           if (!clientesPorPromo.has(cp.id_promocion)) clientesPorPromo.set(cp.id_promocion, [])
           clientesPorPromo.get(cp.id_promocion)!.push(cp.id_cliente)
         })
       }
-      
+
       const mapped = promosRes.datos.map((p: any) => {
         let tipoNormalizado = p.tipo_promocion || 'descuento'
         
@@ -514,6 +528,8 @@ const loadPromociones = async () => {
           tipoNormalizado = 'bogo'
         } else if (tipoNormalizado === 'fijo') {
           tipoNormalizado = 'monto'
+        } else if (tipoNormalizado === 'descuento_fijo' || tipoNormalizado === 'descuento fijo') {
+          tipoNormalizado = 'descuento_fijo'
         }
         
         let diasArray: string[] | null = null
@@ -542,6 +558,8 @@ const loadPromociones = async () => {
           dias: p.dias || null,
           dias_aplicables: diasArray,
           productos: productosPorPromo.get(p.id_promocion) || [],
+          paquetes: paquetesPorPromo.get(p.id_promocion) || [],
+          categoria: p.categoria || null,
           clientes: clientesSpecificos
         }
       })
@@ -1046,7 +1064,7 @@ const finalizePackageAdd = () => {
 
   const selections: { id_grupo: number; id_producto: number; nombre: string }[] = []
   let extraPrice = 0
-  
+
   packageSelections.value.forEach((productos, grupoId) => {
     productos.forEach(p => {
       selections.push({ id_grupo: Number(grupoId), id_producto: p.id_producto, nombre: p.nombre_producto })
@@ -1055,26 +1073,41 @@ const finalizePackageAdd = () => {
   })
 
   const finalPrice = selectedPackage.value.precio + extraPrice
-  
-  cart.value.push({
+
+  const cartItemBase = {
     cartId: Date.now(),
     productId: selectedPackage.value.id_paquete,
     name: selectedPackage.value.nombre_paquete,
     qty: 1,
     basePrice: selectedPackage.value.precio,
     modifiers: [],
-    unitTotal: finalPrice,
+    unitTotal: isPromoPaqueteContext.value ? 0 : finalPrice,
     isPackage: true,
     packageId: selectedPackage.value.id_paquete,
     packageSelections: selections,
     extraPrice: extraPrice,
     packageProductModifiers: { ...packageProductModifiers.value }
-  })
+  }
+
+  if (isPromoPaqueteContext.value) {
+    const promoGroupId = Date.now()
+    cart.value.push({
+      ...cartItemBase,
+      promoGroupId,
+      promoGroupName: selectedPromo.value?.nombre || 'Descuento Fijo',
+      isPromoItem: true
+    })
+  } else {
+    cart.value.push(cartItemBase)
+  }
 
   playSound('added')
   displayToast(`${selectedPackage.value.nombre_paquete} agregado`, 'success')
   packageProductModifiers.value = {}
   currentPendingPackageSelections.value = []
+  isPromoPaqueteContext.value = false
+  promoContextPaquete.value = null
+  showPromoModal.value = false
 }
 
 // ── RFID ────────────────────────────────────────────────
@@ -1229,25 +1262,41 @@ const confirmRfidClient = () => {
 
 // ── MODAL DE PROMOCIÓN ─────────────────────────────────────
 const openPromoModal = async (promo: Promocion) => {
-  selectedPromo.value = promo
-  promoSelectedProducts.value = {}
-  promoItemsWithModifiers.value = []
-  
-  const promoProds = promo.productos || []
-  if (promoProds.length > 0) {
-    promoProductos.value = allProducts.value.filter(p => 
-      promoProds.includes(p.id_producto) && 
-      p.disponibilidad !== false && 
-      productosEnMenusActivos.value.includes(p.id_producto)
-    )
-  } else {
-    promoProductos.value = allProducts.value.filter(p => 
-      p.disponibilidad !== false && 
-      productosEnMenusActivos.value.includes(p.id_producto)
-    )
-  }
-  
-  showPromoModal.value = true
+  selectedPromo.value = promo
+  promoSelectedProducts.value = {}
+  promoItemsWithModifiers.value = []
+
+const isDescFijoPaquete = promo.tipo === 'descuento_fijo' && Array.isArray(promo.paquetes) && promo.paquetes.length > 0
+  const isDescFijoProducto = promo.tipo === 'descuento_fijo' && !isDescFijoPaquete && !!promo.categoria && promo.categoria !== ''
+
+  if (isDescFijoProducto) {
+    promoProductos.value = allProducts.value.filter(p =>
+      p.categoria === promo.categoria &&
+      p.disponibilidad !== false &&
+      productosEnMenusActivos.value.includes(p.id_producto)
+    )
+  } else if (isDescFijoPaquete) {
+    promoProductos.value = []
+    promoPaquetes.value = paquetes.value.filter((p: any) =>
+      (promo.paquetes || []).includes(p.id_paquete || p.id)
+    )
+  } else {
+    const promoProds = promo.productos || []
+    if (promoProds.length > 0) {
+      promoProductos.value = allProducts.value.filter(p =>
+        promoProds.includes(p.id_producto) &&
+        p.disponibilidad !== false &&
+        productosEnMenusActivos.value.includes(p.id_producto)
+      )
+    } else {
+      promoProductos.value = allProducts.value.filter(p =>
+        p.disponibilidad !== false &&
+        productosEnMenusActivos.value.includes(p.id_producto)
+      )
+    }
+  }
+
+  showPromoModal.value = true
 }
 
 const openPromoProductOptions = async (product: Producto) => {
@@ -1294,6 +1343,27 @@ const togglePromoProduct = (productId: number) => {
   if (!producto) return
 
   openPromoProductOptions(producto)
+}
+
+const togglePromoPaquet = async (paquete: any) => {
+  if (promoItemsWithModifiers.value.length >= 1) {
+    displayToast('Máximo 1 paquete para descuento gratis', 'warning')
+    return
+  }
+
+  const grupos = paquete.grupos || []
+  if (grupos.length > 0) {
+    packageSelections.value = new Map()
+    packageValidationError.value = ''
+    selectedPackage.value = { ...paquete, grupos }
+    isPromoPaqueteContext.value = true
+    promoContextPaquete.value = paquete
+    showPackageModal.value = true
+  } else {
+    promoItemsWithModifiers.value.push({ product: { id_producto: paquete.id_paquete || paquete.id, nombre_producto: paquete.nombre_paquete, precio_base: paquete.precio, categoria: 'Paquete', url_imagen: '' }, modifiers: [] })
+    displayToast(`Paquete seleccionado (sin opciones)`, 'success')
+    showPromoModal.value = false
+  }
 }
 
 const confirmPromoSelection = () => {
@@ -1800,7 +1870,7 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
             <div class="product-emoji">🏷️</div>
             <span class="product-name">{{ promo.nombre }}</span>
             <span class="promo-badge" :class="promo.tipo">
-              {{ promo.tipo === 'porcentaje' ? `-${promo.valor}%` : promo.tipo === 'monto' ? `-$${promo.valor}` : '2x1' }}
+              {{ promo.tipo === 'porcentaje' ? `-${promo.valor}%` : promo.tipo === 'monto' ? `-$${promo.valor}` : promo.tipo === 'descuento_fijo' ? 'GRATIS' : '2x1' }}
             </span>
             <span class="promo-hint">Toca para aplicar</span>
           </div>
@@ -2034,11 +2104,11 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
         </div>
 
         <div class="promo-products-list">
-          <div 
-            v-for="prod in promoProductos" 
+          <div
+            v-for="prod in promoProductos"
             :key="prod.id_producto"
             class="promo-product-item"
-            :class="{ disabled: promoItemsWithModifiers.length >= 2 }"
+            :class="{ disabled: selectedPromo.tipo === 'descuento_fijo' ? promoItemsWithModifiers.length >= 1 : promoItemsWithModifiers.length >= 2 }"
             @click="togglePromoProduct(prod.id_producto)"
           >
             <div class="promo-prod-info">
@@ -2053,7 +2123,24 @@ const formatDiscount = (promo: { tipo: string; valor: number }) => {
               <span v-else-if="selectedPromo.tipo === 'monto'" class="disc-price">
                 ${{ Math.max(0, prod.precio_base - selectedPromo.valor).toFixed(2) }}
               </span>
+              <span v-else-if="selectedPromo.tipo === 'descuento_fijo'" class="disc-price">GRATIS</span>
               <span v-else class="disc-price">${{ prod.precio_base.toFixed(2) }} (x2)</span>
+            </div>
+          </div>
+          <div
+            v-for="paq in promoPaquetes"
+            :key="paq.id_paquete || paq.id"
+            class="promo-product-item"
+            :class="{ disabled: promoItemsWithModifiers.length >= 1 }"
+            @click="togglePromoPaquet(paq)"
+          >
+            <div class="promo-prod-info">
+              <span class="promo-prod-name">{{ paq.nombre_paquete }}</span>
+              <span class="promo-prod-cat">Paquete</span>
+            </div>
+            <div class="promo-prod-price">
+              <span class="original-price">${{ paq.precio.toFixed(2) }}</span>
+              <span v-if="selectedPromo.tipo === 'descuento_fijo'" class="disc-price">GRATIS</span>
             </div>
           </div>
         </div>

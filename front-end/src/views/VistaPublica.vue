@@ -44,7 +44,7 @@ let interval: ReturnType<typeof setInterval>
 
 onMounted(() => {
   fetchOrdenes()
-  interval = setInterval(fetchOrdenes, 20000)
+  interval = setInterval(fetchOrdenes, 5000)
 })
 
 onUnmounted(() => {
@@ -65,7 +65,7 @@ const formatTime = (fecha: string) => {
       <h1>Pedidos</h1>
       <div class="refresh-info">
         <span class="dot" :class="{ error: !!error }"></span>
-        {{ error || 'Actualizando cada 20s' }}
+        {{ error }}
       </div>
     </header>
 
