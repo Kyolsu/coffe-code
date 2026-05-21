@@ -12,6 +12,7 @@ interface Venta {
   numero_orden: string
   total: number
   fecha: string
+  fecha_creacion: string
   estado_orden: string
   id_cliente: number | null
   nombre_cliente: string | null
@@ -68,10 +69,18 @@ const filtroCliente = ref<string>('todos')
 
 // ── CARGA DE DATOS ─────────────────────
 const parseFechaLocal = (fechaISO: string | null | undefined): string => {
-  if (!fechaISO) return new Date().toISOString().split('T')[0] ?? ''
+  if (!fechaISO) {
+    const d = new Date()
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
   const d = new Date(fechaISO)
-  const partes = d.toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }).split('/')
-  return `${partes[2]}-${partes[1]?.padStart(2, '0') ?? '01'}-${partes[0]?.padStart(2, '0') ?? '01'}`
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 const loadData = async () => {
@@ -90,6 +99,7 @@ const loadData = async () => {
         numero_orden: o.numero_orden || `#${o.id_orden}`,
         total: Number(o.total) || 0,
         fecha: parseFechaLocal(o.fecha_creacion),
+        fecha_creacion: o.fecha_creacion,
         estado_orden: o.estado_orden,
         id_cliente: o.id_cliente || null,
         nombre_cliente: o.cliente || null
@@ -104,23 +114,35 @@ const loadData = async () => {
 }
 
 // ── FILTRO ─────────────────────────────
+const getFechaHoy = (): string => {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+const getFechaDiasAtras = (dias: number): string => {
+  const d = new Date()
+  d.setDate(d.getDate() - dias)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 const ventasFiltradas = computed(() => {
-  const hoy = new Date()
-  hoy.setHours(0, 0, 0, 0)
+  const hoyStr = getFechaHoy()
 
   return ventas.value.filter(v => {
-    const fecha = new Date(v.fecha)
-    fecha.setHours(0, 0, 0, 0)
-    const diff = (hoy.getTime() - fecha.getTime()) / (1000 * 3600 * 24)
-
     if (filtro.value === 'dia') {
-      if (diff > 1) return false
+      if (v.fecha !== hoyStr) return false
     }
     if (filtro.value === 'semana') {
-      if (diff > 7) return false
+      if (v.fecha < getFechaDiasAtras(7)) return false
     }
     if (filtro.value === 'mes') {
-      if (diff > 30) return false
+      if (v.fecha < getFechaDiasAtras(30)) return false
     }
 
     if (filtroCliente.value === 'sin_cliente') {
@@ -131,7 +153,7 @@ const ventasFiltradas = computed(() => {
     }
 
     return true
-  }).sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
+  }).sort((a, b) => a.fecha.localeCompare(b.fecha))
 })
 
 // ── AGRUPACIÓN POR DÍA ─────────────────
@@ -148,7 +170,7 @@ const ventasPorDia = computed((): StatsDia[] => {
 
   return Array.from(mapa.entries())
     .map(([fecha, data]) => ({ fecha, ...data }))
-    .sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
+    .sort((a, b) => a.fecha.localeCompare(b.fecha))
 })
 
 // ── KPIs ─────────────────────────────
@@ -173,39 +195,63 @@ const ordenesPorEstado = computed(() => {
 })
 
 // ── GRÁFICA ─────────────────────────────
-const puntosGrafica = computed(() => {
-  const datos = ventasPorDia.value
-  if (datos.length === 0) return ''
+const formatFechaCorta = (fecha: string): string => {
+  const partes = fecha.split('-')
+  if (partes.length !== 3) return fecha
+  return `${partes[2]}/${partes[1]}`
+}
 
-  const max = Math.max(...datos.map(d => d.total), 1)
+const formatFechaTabla = (fecha: string): string => {
+  const partes = fecha.split('-')
+  if (partes.length !== 3) return fecha
+  return `${partes[2]}/${partes[1]}/${partes[0]}`
+}
+
+interface PuntoGrafico {
+  x: number
+  y: number
+  label: string
+}
+
+const datosGrafica = computed((): PuntoGrafico[] => {
+  let valores: { label: string; valor: number }[]
+
+  if (filtro.value === 'dia') {
+    const ordenesHoy = [...ventasFiltradas.value]
+      .sort((a, b) => new Date(a.fecha_creacion).getTime() - new Date(b.fecha_creacion).getTime())
+    valores = ordenesHoy.map(v => ({ label: v.numero_orden, valor: v.total }))
+  } else {
+    valores = ventasPorDia.value.map(d => ({ label: formatFechaCorta(d.fecha), valor: d.total }))
+  }
+
+  if (valores.length === 0) return []
+
+  const max = Math.max(...valores.map(v => v.valor), 1)
   const width = 280
   const height = 80
 
-  return datos.map((d, i) => {
-    const x = datos.length === 1 ? width / 2 : (i / (datos.length - 1)) * width
-    const y = height - (d.total / max) * (height - 10)
-    return `${x},${y}`
-  }).join(' ')
+  return valores.map((v, i) => ({
+    x: valores.length === 1 ? width / 2 : (i / (valores.length - 1)) * width,
+    y: height - (v.valor / max) * (height - 10),
+    label: v.label
+  }))
+})
+
+const puntosGrafica = computed(() => {
+  const datos = datosGrafica.value
+  if (datos.length === 0) return ''
+  return datos.map(d => `${d.x},${d.y}`).join(' ')
 })
 
 const pathArea = computed(() => {
-  const datos = ventasPorDia.value
+  const datos = datosGrafica.value
   if (datos.length === 0) return ''
-
-  const max = Math.max(...datos.map(d => d.total), 1)
-  const width = 280
   const height = 80
-
-  const puntos = datos.map((d, i) => {
-    const x = datos.length === 1 ? width / 2 : (i / (datos.length - 1)) * width
-    const y = height - (d.total / max) * (height - 10)
-    return `${x},${y}`
-  })
-
-  const primerPunto = puntos[0]?.replace(',', ',')
-  const ultimoPunto = puntos[puntos.length - 1]?.replace(',', ',')
-
-  return `M${primerPunto} L${puntos.join(' L')} L${ultimoPunto} L${ultimoPunto?.split(',')[0]},${height} L${primerPunto?.split(',')[0]},${height} Z`
+  const primero = datos[0]
+  const ultimo = datos[datos.length - 1]
+  if (!primero || !ultimo) return ''
+  const puntos = datos.map(d => `${d.x},${d.y}`)
+  return `M${puntos[0]} L${puntos.join(' L')} L${ultimo.x},${height} L${primero.x},${height} Z`
 })
 
 onMounted(() => {
@@ -299,20 +345,19 @@ onMounted(() => {
               stroke-linejoin="round"
             />
 
-            <g v-for="(d, i) in ventasPorDia" :key="d.fecha">
+            <g v-for="(p, i) in datosGrafica" :key="i">
               <circle
-                :cx="ventasPorDia.length === 1 ? 140 : (i / (ventasPorDia.length - 1)) * 280"
-                :cy="80 - (d.total / Math.max(...ventasPorDia.map(x => x.total), 1)) * 70"
+                :cx="p.x"
+                :cy="p.y"
                 r="4"
                 class="chart-dot"
               />
               <text
-                v-if="ventasPorDia.length <= 7"
-                :x="ventasPorDia.length === 1 ? 140 : (i / (ventasPorDia.length - 1)) * 280"
+                :x="p.x"
                 y="95"
                 class="chart-label"
               >
-                {{ new Date(d.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' }) }}
+                {{ p.label }}
               </text>
             </g>
           </svg>
