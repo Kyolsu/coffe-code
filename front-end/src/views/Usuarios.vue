@@ -18,6 +18,7 @@ const NOMBRE_PERMISOS: Record<number, string> = {
   6: 'Clientes',
   7: 'Estadísticas',
   8: 'Usuarios',
+  9: 'Personalización'
 }
 
 // ── ESTADOS GLOBALES ─────────────────────────────────────────────────────────
@@ -171,8 +172,6 @@ const showToast = (message: string, type: 'success' | 'error' = 'success') => {
 }
 
 const openModal = (type: 'crear' | 'editar' | 'eliminar' | 'cambiar-rol' | 'crear-rol', user: any = null, rol: any = null) => {
-  if (!puedeAdministrar.value && type !== 'cambiar-rol') return
-
   modalType.value = type
   if (type === 'crear') {
     formData.value = { usuario: '', contra: '', rol: '' }
@@ -310,74 +309,138 @@ onMounted(() => {
       </button>
     </div>
 
+    <!-- SECCIÓN USUARIOS -->
     <div v-if="seccionActiva === 'usuarios'">
       <div v-if="!puedeAdministrar" class="alert-banner">
         <strong>Aviso:</strong> Tienes permisos de solo lectura. Únicamente quienes tengan permiso de administrar usuarios pueden crear, modificar o dar de baja usuarios.
       </div>
 
-    <div class="toolbar">
-      <div class="search-box">
-        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <input v-model="searchQuery" type="text" placeholder="Buscar usuario..." class="search-input" />
+      <div class="toolbar">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input v-model="searchQuery" type="text" placeholder="Buscar usuario..." class="search-input" />
+        </div>
+
+        <div class="filters-group">
+          <select v-model="roleFilter" class="filter-select">
+            <option value="">Todos los Roles</option>
+            <option v-for="rol in roles" :key="rol.id_rol" :value="rol.id_rol">
+              {{ rol.nombre_rol }}
+            </option>
+          </select>
+        </div>
+
+        <div class="actions-group">
+          <button v-if="puedeAdministrar" @click="openModal('crear')" class="btn-primary">
+            + Nuevo Usuario
+          </button>
+        </div>
       </div>
 
-      <div class="filters-group">
-        <select v-model="roleFilter" class="filter-select">
-          <option value="">Todos los Roles</option>
-          <option v-for="rol in roles" :key="rol.id_rol" :value="rol.id_rol">
-            {{ rol.nombre_rol }}
-          </option>
-        </select>
-      </div>
+      <main class="tab-content">
+        <div v-if="isLoading" class="loading-state">Cargando usuarios...</div>
 
-      <div class="actions-group">
-        <button v-if="puedeAdministrar" @click="openModal('crear')" class="btn-primary">
-          + Nuevo Usuario
-        </button>
-      </div>
-    </div>
-
-    <main class="tab-content">
-      <div v-if="isLoading" class="loading-state">Cargando usuarios...</div>
-
-      <div v-else class="grid-container">
-        <div v-if="filteredUsuarios.length === 0" class="empty-state">No se encontraron usuarios.</div>
-        
-        <div v-for="user in filteredUsuarios" :key="user.id_usuario || user.id" class="card">
-          <div class="card-header">
-            <div class="user-info">
-              <div class="avatar-placeholder">
-                {{ (user.nombre_usuario || user.nombre || user.usuario || '?').charAt(0).toUpperCase() }}
-              </div>
-              <h3 class="card-title">{{ user.nombre_usuario || user.nombre || user.usuario }}</h3>
-            </div>
-          </div>
+        <div v-else class="grid-container">
+          <div v-if="filteredUsuarios.length === 0" class="empty-state">No se encontraron usuarios.</div>
           
-          <div class="card-footer mt-auto">
-            <div class="badges-container">
-              <span class="badge role-badge">{{ user.nombre_rol || 'Rol: ' + (user.id_rol || user.rol) }}</span>
+          <div v-for="user in filteredUsuarios" :key="user.id_usuario || user.id" class="card">
+            <div class="card-header">
+              <div class="user-info">
+                <div class="avatar-placeholder">
+                  {{ (user.nombre_usuario || user.nombre || user.usuario || '?').charAt(0).toUpperCase() }}
+                </div>
+                <h3 class="card-title">{{ user.nombre_usuario || user.nombre || user.usuario }}</h3>
+              </div>
             </div>
             
-            <div v-if="puedeAdministrar" class="actions-container">
-              <button @click="openModal('cambiar-rol', user)" class="action-btn role-btn" title="Cambiar Rol">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><path d="M20 8v6M23 11h-6"></path></svg>
-              </button>
-              <button @click="openModal('editar', user)" class="action-btn edit-btn" title="Editar">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-              </button>
-              <button @click="openModal('eliminar', user)" class="action-btn delete-btn" title="Dar de Baja">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-              </button>
+            <div class="card-footer mt-auto">
+              <div class="badges-container">
+                <span class="badge role-badge">{{ user.nombre_rol || 'Rol: ' + (user.id_rol || user.rol) }}</span>
+              </div>
+              
+              <div v-if="puedeAdministrar" class="actions-container">
+                <button @click="openModal('cambiar-rol', user)" class="action-btn role-btn" title="Cambiar Rol">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><path d="M20 8v6M23 11h-6"></path></svg>
+                </button>
+                <button @click="openModal('editar', user)" class="action-btn edit-btn" title="Editar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                </button>
+                <button @click="openModal('eliminar', user)" class="action-btn delete-btn" title="Dar de Baja">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
 
+    <!-- Sección Permisos por Rol -->
+    <div v-if="seccionActiva === 'permisos' && puedeAdministrar" class="permisos-section">
+      <div class="permisos-header">
+        <div>
+          <h2 class="section-title">Administración de Permisos por Rol</h2>
+          <p class="section-subtitle">Configura qué permisos tiene cada rol del sistema.</p>
+        </div>
+        <div class="permisos-header-actions">
+          <button @click="openModal('crear-rol')" class="btn-primary">
+            + Crear Rol
+          </button>
+          <button 
+            v-if="permisosCambiados.size > 0" 
+            @click="guardarPermisosCambiados" 
+            class="btn-primary"
+            :disabled="isSavingPermisos"
+          >
+            {{ isSavingPermisos ? 'Guardando...' : 'Guardar Cambios' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="permisos-table-container">
+        <table class="permisos-table">
+          <thead>
+            <tr>
+              <th>Rol</th>
+              <th v-for="permiso in permisos" :key="permiso.id_permiso">{{ NOMBRE_PERMISOS[permiso.id_permiso] || permiso.nombre_permiso }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="rol in roles" :key="rol.id_rol">
+              <td class="rol-cell">
+                <div class="rol-cell-content">
+                  {{ rol.nombre_rol }}
+                  <button 
+                    @click="eliminarRol(rol)" 
+                    class="delete-rol-btn" 
+                    title="Eliminar rol"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                    </svg>
+                  </button>
+                </div>
+              </td>
+              <td v-for="permiso in permisos" :key="permiso.id_permiso" class="permiso-cell">
+                <input 
+                  type="checkbox" 
+                  :checked="getPermisosDelRol(rol.id_rol).includes(permiso.id_permiso)"
+                  @change="togglePermiso(rol.id_rol, permiso.id_permiso)"
+                  class="permiso-checkbox"
+                  :class="{ 'pending-change': permisosCambiados.has(`${rol.id_rol}-${permiso.id_permiso}`) }"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- EL MODAL SE MOVÍO AQUÍ FUERA (GLOBAL PARA AMBAS VISTAS) -->
     <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
         <h2 class="modal-title">
-          {{ modalType === 'crear' ? 'Registrar Usuario' : modalType === 'editar' ? 'Modificar Usuario' : modalType === 'cambiar-rol' ? 'Cambiar Rol' : 'Confirmar Baja' }}
+          {{ modalType === 'crear' ? 'Registrar Usuario' : modalType === 'editar' ? 'Modificar Usuario' : modalType === 'cambiar-rol' ? 'Cambiar Rol' : modalType === 'crear-rol' ? 'Crear Rol' : 'Confirmar Baja' }}
         </h2>
         
         <form @submit.prevent="handleSubmit" class="modal-form">
@@ -469,68 +532,6 @@ onMounted(() => {
             </button>
           </div>
         </form>
-      </div>
-    </div>
-    </div>
-
-    <!-- Sección Permisos por Rol -->
-    <div v-if="seccionActiva === 'permisos' && puedeAdministrar" class="permisos-section">
-      <div class="permisos-header">
-        <div>
-          <h2 class="section-title">Administración de Permisos por Rol</h2>
-          <p class="section-subtitle">Configura qué permisos tiene cada rol del sistema.</p>
-        </div>
-        <div class="permisos-header-actions">
-          <button @click="openModal('crear-rol')" class="btn-primary">
-            + Crear Rol
-          </button>
-          <button 
-            v-if="permisosCambiados.size > 0" 
-            @click="guardarPermisosCambiados" 
-            class="btn-primary"
-            :disabled="isSavingPermisos"
-          >
-            {{ isSavingPermisos ? 'Guardando...' : 'Guardar Cambios' }}
-          </button>
-        </div>
-      </div>
-
-      <div class="permisos-table-container">
-        <table class="permisos-table">
-          <thead>
-            <tr>
-              <th>Rol</th>
-              <th v-for="permiso in permisos" :key="permiso.id_permiso">{{ NOMBRE_PERMISOS[permiso.id_permiso] || permiso.nombre_permiso }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="rol in roles" :key="rol.id_rol">
-              <td class="rol-cell">
-                <div class="rol-cell-content">
-                  {{ rol.nombre_rol }}
-                  <button 
-                    @click="eliminarRol(rol)" 
-                    class="delete-rol-btn" 
-                    title="Eliminar rol"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                    </svg>
-                  </button>
-                </div>
-              </td>
-              <td v-for="permiso in permisos" :key="permiso.id_permiso" class="permiso-cell">
-                <input 
-                  type="checkbox" 
-                  :checked="getPermisosDelRol(rol.id_rol).includes(permiso.id_permiso)"
-                  @change="togglePermiso(rol.id_rol, permiso.id_permiso)"
-                  class="permiso-checkbox"
-                  :class="{ 'pending-change': permisosCambiados.has(`${rol.id_rol}-${permiso.id_permiso}`) }"
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
       </div>
     </div>
 

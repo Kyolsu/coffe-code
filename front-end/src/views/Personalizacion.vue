@@ -203,6 +203,18 @@ function previewLogo() {
             {{ guardando ? 'Guardando...' : 'Guardar cambios' }}
           </button>
         </div>
+
+        <div class="config-card logo-section">
+          <label class="config-label">URL del Logo</label>
+          <input type="text" v-model="logoUrl" placeholder="https://ejemplo.com/logo.png" class="logo-input" />
+          <div class="logo-preview">
+            <img v-if="logoUrl" :src="logoUrl" alt="Logo preview" class="logo-img" @error="logoUrl = ''" />
+            <span v-else class="logo-placeholder">Sin logo</span>
+          </div>
+        </div>
+
+        <button class="btn-guardar" @click="guardarCambios">Guardar cambios</button>
+
       </div>
     </main>
   </div>

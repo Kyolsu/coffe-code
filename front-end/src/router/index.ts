@@ -92,6 +92,12 @@ const router = createRouter({
           meta: { requiresAuth: true, permissionId: 8 },
         },
         {
+          path: 'personalizacion',
+          name: 'personalizacion',
+          component: () => import('../views/Personalizacion.vue'),
+          meta: { requiresAuth: true, permissionId: 9 },
+        },
+        {
           path: 'perfil',
           name: 'perfil',
           component: () => import('../views/Perfil.vue'),
