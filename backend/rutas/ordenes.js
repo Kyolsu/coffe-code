@@ -54,7 +54,6 @@ router.post('/agregar', verificarToken, async (req, res) => {
             numero_orden,
             estado_orden: 'pendiente',
             total,
-            cliente: null,
             fecha_creacion: new Date().toISOString()
         };
 
@@ -159,20 +158,20 @@ router.post('/sync-estado', async (req, res) => {
 
 router.post('/sync', async (req, res) => {
     try {
-        const { numero_orden, estado_orden, total, cliente, fecha_creacion } = req.body;
+        const { numero_orden, estado_orden, total, fecha_creacion } = req.body;
 
         if (!numero_orden) {
             return res.status(400).json({ status: 'error', mensaje: 'numero_orden es requerido' });
         }
 
         const query = `
-            INSERT INTO ordenes (numero_orden, estado_orden, total, cliente, fecha_creacion)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO ordenes (numero_orden, estado_orden, total, fecha_creacion)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (numero_orden) DO NOTHING
             RETURNING id_orden
         `;
 
-        const result = await db.query(query, [numero_orden, estado_orden || 'pendiente', total, cliente, fecha_creacion]);
+        const result = await db.query(query, [numero_orden, estado_orden || 'pendiente', total, fecha_creacion]);
 
         res.status(201).json({ status: 'ok', id_orden: result.rows[0]?.id_orden });
     } catch (err) {
