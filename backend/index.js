@@ -18,6 +18,7 @@ const PromocionesRutas = require('./rutas/promociones');
 const ordenesRutas = require('./rutas/ordenes');
 const inventarioRutas = require('./rutas/inventario');
 const IOTRutas = require('./rutas/iot');
+const personalizacionRutas = require('./rutas/personalizacion');
 
 const app = express();
 
@@ -70,6 +71,7 @@ app.use('/api/promociones', PromocionesRutas);
 app.use('/api/ordenes', ordenesRutas);
 app.use('/api/inventario', inventarioRutas);
 app.use('/api/iot', IOTRutas);
+app.use('/api/personalizacion', personalizacionRutas);
 
 // 
 server.listen(port, '0.0.0.0', () => {

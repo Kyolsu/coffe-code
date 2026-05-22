@@ -103,6 +103,12 @@ const router = createRouter({
           component: () => import('../views/Perfil.vue'),
           meta: { requiresAuth: true },
         },
+        {
+          path: 'personalizacion',
+          name: 'personalizacion',
+          component: () => import('../views/Personalizacion.vue'),
+          meta: { requiresAuth: true, permissionId: 9 },
+        },
       ],
     },
 

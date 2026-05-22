@@ -1,5 +1,14 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
+import { useTenantStore } from './stores/tenant'
+
+onMounted(() => {
+  const token = localStorage.getItem('coffe_token')
+  if (token) {
+    useTenantStore().cargarConfig()
+  }
+})
 </script>
 
 <template>
