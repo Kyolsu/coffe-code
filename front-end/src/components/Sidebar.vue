@@ -11,15 +11,16 @@ const isCollapsed = ref(false)
 // userRole para lógicas adicionales
 const userRole = computed(() => authStore.rol)
 
-// Permisos por vista: 1=dashboard, 2=venta, 3=menu, 4=ordenes, 5=cocina, 6=clientes, 7=estadisticas, 8=usuarios
-const puedeDashboard    = computed(() => authStore.tienePermiso(1))
-const puedeVenta        = computed(() => authStore.tienePermiso(2))
-const puedeMenu         = computed(() => authStore.tienePermiso(3))
-const puedeOrdenes      = computed(() => authStore.tienePermiso(4))
-const puedeCocina       = computed(() => authStore.tienePermiso(5))
-const puedeClientes     = computed(() => authStore.tienePermiso(6))
-const puedeEstadisticas = computed(() => authStore.tienePermiso(7))
-const puedeUsuarios     = computed(() => authStore.tienePermiso(8))
+// Permisos por vista: 1=dashboard, 2=venta, 3=menu, 4=ordenes, 5=cocina, 6=clientes, 7=estadisticas, 8=usuarios, 9=personalizacion
+const puedeDashboard        = computed(() => authStore.tienePermiso(1))
+const puedeVenta            = computed(() => authStore.tienePermiso(2))
+const puedeMenu             = computed(() => authStore.tienePermiso(3))
+const puedeOrdenes          = computed(() => authStore.tienePermiso(4))
+const puedeCocina           = computed(() => authStore.tienePermiso(5))
+const puedeClientes         = computed(() => authStore.tienePermiso(6))
+const puedeEstadisticas     = computed(() => authStore.tienePermiso(7))
+const puedeUsuarios         = computed(() => authStore.tienePermiso(8))
+const puedePersonalizacion  = computed(() => authStore.tienePermiso(9))
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
@@ -135,10 +136,10 @@ const handleLogout = () => {
       </a>
 
       <!-- Solo usuarios con permiso 4 (administrar usuarios) -->
-      <template v-if="puedeUsuarios">
+      <template v-if="puedeUsuarios || puedePersonalizacion">
         <div v-if="!isCollapsed" class="nav-divider"></div>
 
-        <RouterLink to="/usuarios" class="nav-item">
+        <RouterLink v-if="puedeUsuarios" to="/usuarios" class="nav-item">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.5"/>
@@ -148,6 +149,15 @@ const handleLogout = () => {
           <span v-if="!isCollapsed" class="nav-label">Usuarios</span>
         </RouterLink>
 
+        <RouterLink v-if="puedePersonalizacion" to="/personalizacion" class="nav-item">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span v-if="!isCollapsed" class="nav-label">Personalizar</span>
+        </RouterLink>
 
       </template>
 
