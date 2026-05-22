@@ -36,6 +36,7 @@ export const useAuthStore = defineStore('auth', () => {
           grouped[row.id_rol]!.push(row.id_permiso)
         }
         permisosRaw.value = grouped
+        window.__permisosPorRol = grouped
       }
     } catch {
       console.error('Error cargando permisos')
@@ -50,7 +51,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const permisosDelRol = computed(() => {
     if (!rolNum.value) return []
-    return window.__permisosPorRol?.[rolNum.value] ?? []
+    return permisosRaw.value[rolNum.value] ?? []
   })
 
   function tienePermiso(idPermiso: number): boolean {
