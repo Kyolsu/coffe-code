@@ -157,6 +157,30 @@ router.post('/sync-estado', async (req, res) => {
     }
 });
 
+router.post('/sync', async (req, res) => {
+    try {
+        const { numero_orden, estado_orden, total, cliente, fecha_creacion } = req.body;
+
+        if (!numero_orden) {
+            return res.status(400).json({ status: 'error', mensaje: 'numero_orden es requerido' });
+        }
+
+        const query = `
+            INSERT INTO ordenes (numero_orden, estado_orden, total, cliente, fecha_creacion)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (numero_orden) DO NOTHING
+            RETURNING id_orden
+        `;
+
+        const result = await db.query(query, [numero_orden, estado_orden || 'pendiente', total, cliente, fecha_creacion]);
+
+        res.status(201).json({ status: 'ok', id_orden: result.rows[0]?.id_orden });
+    } catch (err) {
+        console.error('Error en sync:', err.message);
+        res.status(500).json({ status: 'error', mensaje: err.message });
+    }
+});
+
 router.put('/modificar/:id', verificarToken, async (req, res) => {
     try {
         const { id } = req.params;
