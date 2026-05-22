@@ -163,17 +163,6 @@ const handleLogout = () => {
 
       </template>
 
-      <!-- Solo usuarios con permiso 9 (personalización) -->
-      <RouterLink v-if="puedePersonalizacion" to="/personalizacion" class="nav-item">
-        <span class="nav-icon">
-          <svg viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </span>
-        <span v-if="!isCollapsed" class="nav-label">Personalización</span>
-      </RouterLink>
-
     </nav>
 
     <!-- Footer: perfil + logout -->
