@@ -19,7 +19,8 @@ const puedeOrdenes      = computed(() => authStore.tienePermiso(4))
 const puedeCocina       = computed(() => authStore.tienePermiso(5))
 const puedeClientes     = computed(() => authStore.tienePermiso(6))
 const puedeEstadisticas = computed(() => authStore.tienePermiso(7))
-const puedeUsuarios     = computed(() => authStore.tienePermiso(8))
+const puedePersonalizacion = computed(() => authStore.tienePermiso(9))
+const puedeUsuarios = computed(() => authStore.tienePermiso(8))
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
@@ -150,6 +151,17 @@ const handleLogout = () => {
 
 
       </template>
+
+      <!-- Solo usuarios con permiso 9 (personalización) -->
+      <RouterLink v-if="puedePersonalizacion" to="/personalizacion" class="nav-item">
+        <span class="nav-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span v-if="!isCollapsed" class="nav-label">Personalización</span>
+      </RouterLink>
 
     </nav>
 
