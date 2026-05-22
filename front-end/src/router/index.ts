@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { API_URL } from '../config/api'
+import { useAuthStore } from '../stores/auth'
 
 // ── VISTAS Y LAYOUTS ────────────────────────────────────────────────────────
 import MainLayout          from '../layouts/MainLayout.vue'
@@ -204,7 +205,8 @@ router.beforeEach(async (to, _from) => {
 
     // Cargar permisos si no están cargados
     if (!window.__permisosPorRol) {
-      await cargarPermisos()
+      const authStore = useAuthStore()
+      await authStore.cargarPermisos()
     }
   }
 
